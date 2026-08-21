@@ -71,7 +71,7 @@ class FRESEAN(AnalysisBase):
         self,
         universe_or_atomgroup: Union["Universe", "AtomGroup"],
         select: str = "all",
-        n_constraints: int = 6,
+        n_constraints: int = 0,
         n_corr: int = 500,
         dt: float = 0.004,
         sigma: float = 10.0,
