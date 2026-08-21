@@ -19,16 +19,28 @@ The rules for this file:
 ## [Unreleased]
 
 ### Authors
-<!-- GitHub usernames of contributors to this release -->
+- @amruthesht
 
 ### Added
-<!-- New added features -->
+- Exact AA reconstruction from CG trajectories using COM-relative displacement
+  vectors, with matching velocity backmap and ``track`` / ``ref`` centered modes.
+- ``reconstruct_aa_universe``, ``aa_universe_from_cg``, and save/load helpers for
+  per-frame centered vectors (``aa_rotations.npz``) and ``cg_map.npz``.
+- Unified coarse-graining I/O: ``aa`` / ``u_cg`` accept a Universe, file path, or
+  ``(topology, trajectory)``; ``mapping`` is a ``CoarseGrain`` or
+  ``(aa_atomgroup, cg_map)``.
+- ``martini`` registered as a supported CG method name (stub; not implemented).
+- Expanded ``test_coarse_grain.py`` coverage; updated existing
+  ``04_CG-alanine-dipeptide-gas-300K`` notebook (backmap roundtrip, FRESEAN);
+  added new ``05_CG-hewl`` example.
 
 ### Fixed
 <!-- Bug fixes -->
 
 ### Changed
-<!-- Changes in existing functionality -->
+- ``FRESEAN`` default ``n_constraints`` is ``0`` for CG workflows.
+- Backmap load, arithmetic, and trajectory write use float32 to match CG and
+  centered-vector file storage.
 
 ### Deprecated
 <!-- Soon-to-be removed features -->
