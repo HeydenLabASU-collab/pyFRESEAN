@@ -7,12 +7,15 @@ This module contains the :class:`FRESEAN` class.
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, Union
+import os
+from concurrent.futures import ThreadPoolExecutor
+from typing import TYPE_CHECKING, Literal, Optional, Union
 
 LagSymmetrization = Literal["mirror", "average"]
 
 import numpy as np
 from MDAnalysis.analysis.base import AnalysisBase, Results
+from MDAnalysis.analysis.results import ResultsGroup
 from scipy.fft import fft, ifft
 
 if TYPE_CHECKING:
@@ -53,6 +56,17 @@ class FRESEAN(AnalysisBase):
         negative-lag bin from :func:`scipy.fft.ifft`), then mirror for the
         second half. The latter is more appropriate for cross-correlations on
         finite trajectories.
+    n_jobs: int or None
+        Number of threads for :meth:`_conclude` work. ``1`` or ``None`` runs
+        serially (default). ``-1`` uses :func:`os.cpu_count`. Used for the
+        velocity cross-correlation loop (parallel over row index ``i``) and
+        for per-frequency :func:`numpy.linalg.eigh` diagonalization.
+    run(..., n_workers=N, backend="multiprocessing")
+        When ``n_workers`` > 1 and a parallel backend is used, MDAnalysis
+        splits the trajectory across workers for :meth:`_single_frame`
+        velocity collection. :meth:`_conclude` still runs once on the parent
+        process after merging partial results. Requires parallelizable
+        trajectory transformations (e.g. :class:`pyfresean.Align`).
 
     Attributes
     ----------
@@ -79,6 +93,27 @@ class FRESEAN(AnalysisBase):
         :meth:`FRESEAN.run`
     """
 
+    _analysis_algorithm_is_parallelizable = True
+
+    @classmethod
+    def get_supported_backends(cls):
+        return ("serial", "multiprocessing", "dask")
+
+    @staticmethod
+    def _take_first_result(values):
+        return values[0]
+
+    def _get_aggregator(self):
+        return ResultsGroup(
+            lookup={
+                "velocities": ResultsGroup.ndarray_hstack,
+                "freqs": FRESEAN._take_first_result,
+                "win_time": FRESEAN._take_first_result,
+                "n_dof": FRESEAN._take_first_result,
+                "corr_matrix": FRESEAN._take_first_result,
+            }
+        )
+
     def __init__(
         self,
         universe_or_atomgroup: Union["Universe", "AtomGroup"],
@@ -88,6 +123,7 @@ class FRESEAN(AnalysisBase):
         dt: float = 0.004,
         sigma: float = 10.0,
         lag_symmetrization: LagSymmetrization = "mirror",
+        n_jobs: Optional[int] = 1,
         **kwargs,
     ):
         # the below line must be kept to initialize the AnalysisBase class!
@@ -110,6 +146,20 @@ class FRESEAN(AnalysisBase):
                 f"got {lag_symmetrization!r}"
             )
         self.lag_symmetrization = lag_symmetrization
+        if n_jobs is not None and n_jobs != 1 and n_jobs != -1 and n_jobs < 2:
+            raise ValueError(
+                "n_jobs must be None, 1, -1, or an integer >= 2; "
+                f"got {n_jobs!r}"
+            )
+        self.n_jobs = n_jobs
+
+    @staticmethod
+    def _resolve_n_jobs(n_jobs: Optional[int]) -> int:
+        if n_jobs is None or n_jobs == 1:
+            return 1
+        if n_jobs < 0:
+            return os.cpu_count() or 1
+        return n_jobs
 
     def _build_windowed_lags(
         self,
@@ -128,16 +178,134 @@ class FRESEAN(AnalysisBase):
         tmp_windowed[n_corr:] = tmp_windowed[n_corr - 1 : 0 : -1]
         return tmp_windowed
 
-    def _prepare(self):
-        """Set things up before the analysis loop begins"""
-        # This is an optional method that runs before
-        # _single_frame loops over the trajectory.
-        # It is useful for setting up results arrays
+    def _corr_spectrum_from_velocities(
+        self,
+        vel_i: np.ndarray,
+        vel_j: np.ndarray,
+        win_time: np.ndarray,
+        n_corr: int,
+        n_frames: int,
+    ) -> np.ndarray:
+        tmp_freq = np.real(vel_i * vel_j.conj())
+        tmp_time = np.real(ifft(tmp_freq))
+        tmp_windowed = self._build_windowed_lags(tmp_time, n_corr, n_frames)
+        tmp_windowed *= win_time
+        return np.real(fft(tmp_windowed)[:n_corr])
+
+    def _fill_corr_matrix_row(
+        self,
+        i: int,
+        velocities: np.ndarray,
+        corr_matrix: np.ndarray,
+        win_time: np.ndarray,
+        n_corr: int,
+        n_frames: int,
+        n_elements: int,
+    ) -> None:
+        for j in range(i, n_elements):
+            corr_matrix[:, i, j] = self._corr_spectrum_from_velocities(
+                velocities[i],
+                velocities[j],
+                win_time,
+                n_corr,
+                n_frames,
+            )
+
+    def _symmetrize_corr_matrix(self, corr_matrix: np.ndarray, n_elements: int) -> None:
+        for i in range(n_elements):
+            for j in range(i + 1, n_elements):
+                corr_matrix[:, j, i] = corr_matrix[:, i, j]
+
+    def _build_corr_matrix(
+        self,
+        velocities: np.ndarray,
+        corr_matrix: np.ndarray,
+        win_time: np.ndarray,
+        n_corr: int,
+        n_frames: int,
+        n_elements: int,
+    ) -> None:
+        max_workers = self._resolve_n_jobs(self.n_jobs)
+        if max_workers == 1:
+            for i in range(n_elements):
+                self._fill_corr_matrix_row(
+                    i,
+                    velocities,
+                    corr_matrix,
+                    win_time,
+                    n_corr,
+                    n_frames,
+                    n_elements,
+                )
+        else:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                list(
+                    executor.map(
+                        lambda i: self._fill_corr_matrix_row(
+                            i,
+                            velocities,
+                            corr_matrix,
+                            win_time,
+                            n_corr,
+                            n_frames,
+                            n_elements,
+                        ),
+                        range(n_elements),
+                    )
+                )
+        self._symmetrize_corr_matrix(corr_matrix, n_elements)
+
+    def _fill_eigen_at_frequency(
+        self,
+        freq_index: int,
+        corr_matrix: np.ndarray,
+        eigenvalues: np.ndarray,
+        eigenvectors: np.ndarray,
+    ) -> None:
+        vals, vecs = np.linalg.eigh(corr_matrix[freq_index])
+        order = np.argsort(vals)[::-1]
+        eigenvalues[freq_index] = vals[order]
+        eigenvectors[freq_index] = vecs[:, order].T
+
+    def _diagonalize_corr_matrix(
+        self,
+        corr_matrix: np.ndarray,
+        n_corr: int,
+        n_elements: int,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        eigenvalues = np.empty((n_corr, n_elements), dtype=np.float64)
+        eigenvectors = np.empty((n_corr, n_elements, n_elements), dtype=np.float64)
+        max_workers = self._resolve_n_jobs(self.n_jobs)
+        if max_workers == 1:
+            for freq_index in range(n_corr):
+                self._fill_eigen_at_frequency(
+                    freq_index,
+                    corr_matrix,
+                    eigenvalues,
+                    eigenvectors,
+                )
+        else:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                list(
+                    executor.map(
+                        lambda freq_index: self._fill_eigen_at_frequency(
+                            freq_index,
+                            corr_matrix,
+                            eigenvalues,
+                            eigenvectors,
+                        ),
+                        range(n_corr),
+                    )
+                )
+        return eigenvalues, eigenvectors
+
+    def _init_run_metadata(self) -> None:
         n_elements = self.atomgroup.n_atoms * 3
         self._n_elements = n_elements
         self._n_dof = n_elements - self.n_constraints
         self._sqrt_masses = np.repeat(np.sqrt(self.atomgroup.masses), 3)
 
+    def _init_results_arrays(self) -> None:
         wn0 = 1.0 / ((2 * self.n_corr - 1) * self.dt) * 33.3564
         freqs = np.arange(self.n_corr) * wn0
         win_norm = 1.0 / np.sqrt(2.0 * np.pi * self.sigma**2)
@@ -147,7 +315,7 @@ class FRESEAN(AnalysisBase):
         )
         win_freq[self.n_corr :] = win_freq[self.n_corr - 1 : 0 : -1]
         win_time = np.real(ifft(win_freq))
-
+        n_elements = self._n_elements
         self.results = Results(
             velocities=np.zeros((n_elements, self.n_frames), dtype=np.complex128),
             corr_matrix=np.empty((self.n_corr, n_elements, n_elements)),
@@ -155,6 +323,11 @@ class FRESEAN(AnalysisBase):
             win_time=win_time,
             n_dof=self._n_dof,
         )
+
+    def _prepare(self):
+        """Set things up before the analysis loop begins"""
+        self._init_run_metadata()
+        self._init_results_arrays()
 
     def _single_frame(self):
         """Calculate data from a single frame of trajectory"""
@@ -173,10 +346,8 @@ class FRESEAN(AnalysisBase):
 
     def _conclude(self):
         """Calculate the final results of the analysis"""
-        # This is an optional method that runs after
-        # _single_frame loops over the trajectory.
-        # It is useful for calculating the final results
-        # of the analysis.
+        if not hasattr(self, "_n_elements"):
+            self._init_run_metadata()
         n_elements = self._n_elements
         n_frames = self.n_frames
         n_corr = self.n_corr
@@ -185,25 +356,21 @@ class FRESEAN(AnalysisBase):
         corr_matrix = self.results.corr_matrix
         win_time = self.results.win_time
 
-        for i in range(n_elements):
-            for j in range(i, n_elements):
-                tmp_freq = np.real(velocities[i] * velocities[j].conj())
-                tmp_time = np.real(ifft(tmp_freq))
-                tmp_windowed = self._build_windowed_lags(tmp_time, n_corr, n_frames)
-                tmp_windowed *= win_time
-                corr_matrix[:, i, j] = np.real(fft(tmp_windowed)[:n_corr])
-                if i != j:
-                    corr_matrix[:, j, i] = corr_matrix[:, i, j]
-
+        self._build_corr_matrix(
+            velocities,
+            corr_matrix,
+            win_time,
+            n_corr,
+            n_frames,
+            n_elements,
+        )
         corr_matrix /= n_frames
 
-        eigenvalues = np.empty((n_corr, n_elements), dtype=np.float64)
-        eigenvectors = np.empty((n_corr, n_elements, n_elements), dtype=np.float64)
-        for freq_index in range(n_corr):
-            vals, vecs = np.linalg.eigh(corr_matrix[freq_index])
-            order = np.argsort(vals)[::-1]
-            eigenvalues[freq_index] = vals[order]
-            eigenvectors[freq_index] = vecs[:, order].T
+        eigenvalues, eigenvectors = self._diagonalize_corr_matrix(
+            corr_matrix,
+            n_corr,
+            n_elements,
+        )
 
         avg_temp = (
             np.sum(eigenvalues[0])

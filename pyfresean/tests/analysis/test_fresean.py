@@ -96,3 +96,89 @@ class TestFRESEAN:
         analysis.run()
         assert np.all(np.isfinite(analysis.results.corr_matrix))
         assert np.all(np.isfinite(analysis.results.vdos_total))
+
+    def test_invalid_n_jobs(self, universe):
+        with pytest.raises(ValueError, match="n_jobs"):
+            FRESEAN(universe, n_corr=4, n_jobs=0)
+
+    def test_parallel_n_jobs_matches_serial(self, universe):
+        serial = FRESEAN(universe, n_corr=4, n_jobs=1)
+        parallel = FRESEAN(universe, n_corr=4, n_jobs=2)
+        serial.run()
+        parallel.run()
+        np.testing.assert_allclose(
+            serial.results.corr_matrix,
+            parallel.results.corr_matrix,
+            rtol=0,
+            atol=0,
+        )
+        np.testing.assert_allclose(
+            serial.results.eigenvalues,
+            parallel.results.eigenvalues,
+            rtol=1e-12,
+            atol=1e-12,
+        )
+        np.testing.assert_allclose(
+            serial.results.eigenvectors,
+            parallel.results.eigenvectors,
+            rtol=1e-12,
+            atol=1e-12,
+        )
+        np.testing.assert_allclose(
+            serial.results.vdos_total,
+            parallel.results.vdos_total,
+            rtol=1e-12,
+            atol=1e-12,
+        )
+
+    def test_parallel_corr_matrix_matches_serial(self, universe):
+        serial = FRESEAN(universe, n_corr=4, n_jobs=1)
+        parallel = FRESEAN(universe, n_corr=4, n_jobs=1)
+        serial.run()
+        parallel.run()
+        np.testing.assert_allclose(
+            serial.results.corr_matrix,
+            parallel.results.corr_matrix,
+            rtol=0,
+            atol=0,
+        )
+        np.testing.assert_allclose(
+            serial.results.eigenvalues,
+            parallel.results.eigenvalues,
+            rtol=1e-12,
+            atol=1e-12,
+        )
+        np.testing.assert_allclose(
+            serial.results.vdos_total,
+            parallel.results.vdos_total,
+            rtol=1e-12,
+            atol=1e-12,
+        )
+
+    def test_is_parallelizable(self, universe):
+        analysis = FRESEAN(universe, n_corr=4)
+        assert analysis.parallelizable
+
+    def test_multiprocessing_run_matches_serial(self, universe):
+        serial = FRESEAN(universe, n_corr=4, n_jobs=1)
+        parallel = FRESEAN(universe, n_corr=4, n_jobs=1)
+        serial.run()
+        parallel.run(n_workers=2, backend="multiprocessing", verbose=False)
+        np.testing.assert_allclose(
+            serial.results.corr_matrix,
+            parallel.results.corr_matrix,
+            rtol=0,
+            atol=0,
+        )
+        np.testing.assert_allclose(
+            serial.results.eigenvalues,
+            parallel.results.eigenvalues,
+            rtol=1e-12,
+            atol=1e-12,
+        )
+        np.testing.assert_allclose(
+            serial.results.vdos_total,
+            parallel.results.vdos_total,
+            rtol=1e-12,
+            atol=1e-12,
+        )
