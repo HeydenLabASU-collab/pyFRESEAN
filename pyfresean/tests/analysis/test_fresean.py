@@ -69,3 +69,30 @@ class TestFRESEAN:
         analysis = FRESEAN(universe, n_corr=4)
         analysis.run()
         assert np.all(np.isfinite(analysis.results.vdos_total))
+
+    def test_invalid_lag_symmetrization(self, universe):
+        with pytest.raises(ValueError, match="lag_symmetrization"):
+            FRESEAN(universe, n_corr=4, lag_symmetrization="invalid")
+
+    def test_build_windowed_lags_average(self, universe):
+        analysis = FRESEAN(universe, n_corr=4, lag_symmetrization="average")
+        tmp_time = np.arange(16, dtype=np.float64)
+        windowed = analysis._build_windowed_lags(tmp_time, n_corr=4, n_frames=16)
+        assert windowed[0] == 0.0
+        assert windowed[1] == (1.0 + 15.0) / 2.0
+        assert windowed[2] == (2.0 + 14.0) / 2.0
+        assert windowed[3] == (3.0 + 13.0) / 2.0
+        assert np.allclose(windowed[4:], windowed[3:0:-1])
+
+    def test_build_windowed_lags_mirror(self, universe):
+        analysis = FRESEAN(universe, n_corr=4, lag_symmetrization="mirror")
+        tmp_time = np.arange(16, dtype=np.float64)
+        windowed = analysis._build_windowed_lags(tmp_time, n_corr=4, n_frames=16)
+        assert np.allclose(windowed[:4], tmp_time[:4])
+        assert np.allclose(windowed[4:], tmp_time[3:0:-1])
+
+    def test_average_symmetrization_runs(self, universe):
+        analysis = FRESEAN(universe, n_corr=4, lag_symmetrization="average")
+        analysis.run()
+        assert np.all(np.isfinite(analysis.results.corr_matrix))
+        assert np.all(np.isfinite(analysis.results.vdos_total))
