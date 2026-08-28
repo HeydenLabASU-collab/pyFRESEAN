@@ -7,7 +7,9 @@ This module contains the :class:`FRESEAN` class.
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, Union
+import os
+from concurrent.futures import ThreadPoolExecutor
+from typing import TYPE_CHECKING, Literal, Optional, Union
 
 LagSymmetrization = Literal["mirror", "average"]
 
@@ -53,6 +55,12 @@ class FRESEAN(AnalysisBase):
         negative-lag bin from :func:`scipy.fft.ifft`), then mirror for the
         second half. The latter is more appropriate for cross-correlations on
         finite trajectories.
+    n_jobs: int or None
+        Number of threads for the velocity cross-correlation loop in
+        :meth:`_conclude`. ``1`` or ``None`` runs serially (default). ``-1``
+        uses :func:`os.cpu_count`. Parallelism is over matrix row index ``i``
+        (same structure as ``gen-modes_omp.c``), with a final serial pass to
+        mirror entries across ``i`` and ``j``.
 
     Attributes
     ----------
@@ -88,6 +96,7 @@ class FRESEAN(AnalysisBase):
         dt: float = 0.004,
         sigma: float = 10.0,
         lag_symmetrization: LagSymmetrization = "mirror",
+        n_jobs: Optional[int] = 1,
         **kwargs,
     ):
         # the below line must be kept to initialize the AnalysisBase class!
@@ -110,6 +119,20 @@ class FRESEAN(AnalysisBase):
                 f"got {lag_symmetrization!r}"
             )
         self.lag_symmetrization = lag_symmetrization
+        if n_jobs is not None and n_jobs != 1 and n_jobs != -1 and n_jobs < 2:
+            raise ValueError(
+                "n_jobs must be None, 1, -1, or an integer >= 2; "
+                f"got {n_jobs!r}"
+            )
+        self.n_jobs = n_jobs
+
+    @staticmethod
+    def _resolve_n_jobs(n_jobs: Optional[int]) -> int:
+        if n_jobs is None or n_jobs == 1:
+            return 1
+        if n_jobs < 0:
+            return os.cpu_count() or 1
+        return n_jobs
 
     def _build_windowed_lags(
         self,
@@ -127,6 +150,83 @@ class FRESEAN(AnalysisBase):
             tmp_windowed[:n_corr] = tmp_time[:n_corr]
         tmp_windowed[n_corr:] = tmp_windowed[n_corr - 1 : 0 : -1]
         return tmp_windowed
+
+    def _corr_spectrum_from_velocities(
+        self,
+        vel_i: np.ndarray,
+        vel_j: np.ndarray,
+        win_time: np.ndarray,
+        n_corr: int,
+        n_frames: int,
+    ) -> np.ndarray:
+        tmp_freq = np.real(vel_i * vel_j.conj())
+        tmp_time = np.real(ifft(tmp_freq))
+        tmp_windowed = self._build_windowed_lags(tmp_time, n_corr, n_frames)
+        tmp_windowed *= win_time
+        return np.real(fft(tmp_windowed)[:n_corr])
+
+    def _fill_corr_matrix_row(
+        self,
+        i: int,
+        velocities: np.ndarray,
+        corr_matrix: np.ndarray,
+        win_time: np.ndarray,
+        n_corr: int,
+        n_frames: int,
+        n_elements: int,
+    ) -> None:
+        for j in range(i, n_elements):
+            corr_matrix[:, i, j] = self._corr_spectrum_from_velocities(
+                velocities[i],
+                velocities[j],
+                win_time,
+                n_corr,
+                n_frames,
+            )
+
+    def _symmetrize_corr_matrix(self, corr_matrix: np.ndarray, n_elements: int) -> None:
+        for i in range(n_elements):
+            for j in range(i + 1, n_elements):
+                corr_matrix[:, j, i] = corr_matrix[:, i, j]
+
+    def _build_corr_matrix(
+        self,
+        velocities: np.ndarray,
+        corr_matrix: np.ndarray,
+        win_time: np.ndarray,
+        n_corr: int,
+        n_frames: int,
+        n_elements: int,
+    ) -> None:
+        max_workers = self._resolve_n_jobs(self.n_jobs)
+        if max_workers == 1:
+            for i in range(n_elements):
+                self._fill_corr_matrix_row(
+                    i,
+                    velocities,
+                    corr_matrix,
+                    win_time,
+                    n_corr,
+                    n_frames,
+                    n_elements,
+                )
+        else:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                list(
+                    executor.map(
+                        lambda i: self._fill_corr_matrix_row(
+                            i,
+                            velocities,
+                            corr_matrix,
+                            win_time,
+                            n_corr,
+                            n_frames,
+                            n_elements,
+                        ),
+                        range(n_elements),
+                    )
+                )
+        self._symmetrize_corr_matrix(corr_matrix, n_elements)
 
     def _prepare(self):
         """Set things up before the analysis loop begins"""
@@ -185,16 +285,14 @@ class FRESEAN(AnalysisBase):
         corr_matrix = self.results.corr_matrix
         win_time = self.results.win_time
 
-        for i in range(n_elements):
-            for j in range(i, n_elements):
-                tmp_freq = np.real(velocities[i] * velocities[j].conj())
-                tmp_time = np.real(ifft(tmp_freq))
-                tmp_windowed = self._build_windowed_lags(tmp_time, n_corr, n_frames)
-                tmp_windowed *= win_time
-                corr_matrix[:, i, j] = np.real(fft(tmp_windowed)[:n_corr])
-                if i != j:
-                    corr_matrix[:, j, i] = corr_matrix[:, i, j]
-
+        self._build_corr_matrix(
+            velocities,
+            corr_matrix,
+            win_time,
+            n_corr,
+            n_frames,
+            n_elements,
+        )
         corr_matrix /= n_frames
 
         eigenvalues = np.empty((n_corr, n_elements), dtype=np.float64)
