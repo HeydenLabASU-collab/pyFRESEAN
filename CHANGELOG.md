@@ -22,6 +22,8 @@ The rules for this file:
 - @amruthesht
 
 ### Added
+- ``FRESEAN`` ``lag_symmetrization`` parameter: ``"mirror"`` (default,
+  FRESEAN_tutorial notebooks) or ``"average"`` (averaging of positive and wrapped negative ``ifft`` lag bins). (PR #2)
 - Exact AA reconstruction from CG trajectories using COM-relative displacement
   vectors, with matching velocity backmap and ``track`` / ``ref`` centered modes.
   (PR #1)
