@@ -57,11 +57,10 @@ class FRESEAN(AnalysisBase):
         second half. The latter is more appropriate for cross-correlations on
         finite trajectories.
     n_jobs: int or None
-        Number of threads for the velocity cross-correlation loop in
-        :meth:`_conclude`. ``1`` or ``None`` runs serially (default). ``-1``
-        uses :func:`os.cpu_count`. Parallelism is over matrix row index ``i``
-        (same structure as ``gen-modes_omp.c``), with a final serial pass to
-        mirror entries across ``i`` and ``j``.
+        Number of threads for :meth:`_conclude` work. ``1`` or ``None`` runs
+        serially (default). ``-1`` uses :func:`os.cpu_count`. Used for the
+        velocity cross-correlation loop (parallel over row index ``i``) and
+        for per-frequency :func:`numpy.linalg.eigh` diagonalization.
     run(..., n_workers=N, backend="multiprocessing")
         When ``n_workers`` > 1 and a parallel backend is used, MDAnalysis
         splits the trajectory across workers for :meth:`_single_frame`
@@ -256,6 +255,50 @@ class FRESEAN(AnalysisBase):
                 )
         self._symmetrize_corr_matrix(corr_matrix, n_elements)
 
+    def _fill_eigen_at_frequency(
+        self,
+        freq_index: int,
+        corr_matrix: np.ndarray,
+        eigenvalues: np.ndarray,
+        eigenvectors: np.ndarray,
+    ) -> None:
+        vals, vecs = np.linalg.eigh(corr_matrix[freq_index])
+        order = np.argsort(vals)[::-1]
+        eigenvalues[freq_index] = vals[order]
+        eigenvectors[freq_index] = vecs[:, order].T
+
+    def _diagonalize_corr_matrix(
+        self,
+        corr_matrix: np.ndarray,
+        n_corr: int,
+        n_elements: int,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        eigenvalues = np.empty((n_corr, n_elements), dtype=np.float64)
+        eigenvectors = np.empty((n_corr, n_elements, n_elements), dtype=np.float64)
+        max_workers = self._resolve_n_jobs(self.n_jobs)
+        if max_workers == 1:
+            for freq_index in range(n_corr):
+                self._fill_eigen_at_frequency(
+                    freq_index,
+                    corr_matrix,
+                    eigenvalues,
+                    eigenvectors,
+                )
+        else:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                list(
+                    executor.map(
+                        lambda freq_index: self._fill_eigen_at_frequency(
+                            freq_index,
+                            corr_matrix,
+                            eigenvalues,
+                            eigenvectors,
+                        ),
+                        range(n_corr),
+                    )
+                )
+        return eigenvalues, eigenvectors
+
     def _init_run_metadata(self) -> None:
         n_elements = self.atomgroup.n_atoms * 3
         self._n_elements = n_elements
@@ -323,13 +366,11 @@ class FRESEAN(AnalysisBase):
         )
         corr_matrix /= n_frames
 
-        eigenvalues = np.empty((n_corr, n_elements), dtype=np.float64)
-        eigenvectors = np.empty((n_corr, n_elements, n_elements), dtype=np.float64)
-        for freq_index in range(n_corr):
-            vals, vecs = np.linalg.eigh(corr_matrix[freq_index])
-            order = np.argsort(vals)[::-1]
-            eigenvalues[freq_index] = vals[order]
-            eigenvectors[freq_index] = vecs[:, order].T
+        eigenvalues, eigenvectors = self._diagonalize_corr_matrix(
+            corr_matrix,
+            n_corr,
+            n_elements,
+        )
 
         avg_temp = (
             np.sum(eigenvalues[0])

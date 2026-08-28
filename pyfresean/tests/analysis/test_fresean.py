@@ -101,6 +101,36 @@ class TestFRESEAN:
         with pytest.raises(ValueError, match="n_jobs"):
             FRESEAN(universe, n_corr=4, n_jobs=0)
 
+    def test_parallel_n_jobs_matches_serial(self, universe):
+        serial = FRESEAN(universe, n_corr=4, n_jobs=1)
+        parallel = FRESEAN(universe, n_corr=4, n_jobs=2)
+        serial.run()
+        parallel.run()
+        np.testing.assert_allclose(
+            serial.results.corr_matrix,
+            parallel.results.corr_matrix,
+            rtol=0,
+            atol=0,
+        )
+        np.testing.assert_allclose(
+            serial.results.eigenvalues,
+            parallel.results.eigenvalues,
+            rtol=1e-12,
+            atol=1e-12,
+        )
+        np.testing.assert_allclose(
+            serial.results.eigenvectors,
+            parallel.results.eigenvectors,
+            rtol=1e-12,
+            atol=1e-12,
+        )
+        np.testing.assert_allclose(
+            serial.results.vdos_total,
+            parallel.results.vdos_total,
+            rtol=1e-12,
+            atol=1e-12,
+        )
+
     def test_parallel_corr_matrix_matches_serial(self, universe):
         serial = FRESEAN(universe, n_corr=4, n_jobs=1)
         parallel = FRESEAN(universe, n_corr=4, n_jobs=1)
