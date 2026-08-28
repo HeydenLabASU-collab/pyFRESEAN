@@ -15,6 +15,7 @@ LagSymmetrization = Literal["mirror", "average"]
 
 import numpy as np
 from MDAnalysis.analysis.base import AnalysisBase, Results
+from MDAnalysis.analysis.results import ResultsGroup
 from scipy.fft import fft, ifft
 
 if TYPE_CHECKING:
@@ -61,6 +62,12 @@ class FRESEAN(AnalysisBase):
         uses :func:`os.cpu_count`. Parallelism is over matrix row index ``i``
         (same structure as ``gen-modes_omp.c``), with a final serial pass to
         mirror entries across ``i`` and ``j``.
+    run(..., n_workers=N, backend="multiprocessing")
+        When ``n_workers`` > 1 and a parallel backend is used, MDAnalysis
+        splits the trajectory across workers for :meth:`_single_frame`
+        velocity collection. :meth:`_conclude` still runs once on the parent
+        process after merging partial results. Requires parallelizable
+        trajectory transformations (e.g. :class:`pyfresean.Align`).
 
     Attributes
     ----------
@@ -86,6 +93,27 @@ class FRESEAN(AnalysisBase):
         array of Timestep frame indices. Only exists after calling
         :meth:`FRESEAN.run`
     """
+
+    _analysis_algorithm_is_parallelizable = True
+
+    @classmethod
+    def get_supported_backends(cls):
+        return ("serial", "multiprocessing", "dask")
+
+    @staticmethod
+    def _take_first_result(values):
+        return values[0]
+
+    def _get_aggregator(self):
+        return ResultsGroup(
+            lookup={
+                "velocities": ResultsGroup.ndarray_hstack,
+                "freqs": FRESEAN._take_first_result,
+                "win_time": FRESEAN._take_first_result,
+                "n_dof": FRESEAN._take_first_result,
+                "corr_matrix": FRESEAN._take_first_result,
+            }
+        )
 
     def __init__(
         self,
@@ -228,16 +256,13 @@ class FRESEAN(AnalysisBase):
                 )
         self._symmetrize_corr_matrix(corr_matrix, n_elements)
 
-    def _prepare(self):
-        """Set things up before the analysis loop begins"""
-        # This is an optional method that runs before
-        # _single_frame loops over the trajectory.
-        # It is useful for setting up results arrays
+    def _init_run_metadata(self) -> None:
         n_elements = self.atomgroup.n_atoms * 3
         self._n_elements = n_elements
         self._n_dof = n_elements - self.n_constraints
         self._sqrt_masses = np.repeat(np.sqrt(self.atomgroup.masses), 3)
 
+    def _init_results_arrays(self) -> None:
         wn0 = 1.0 / ((2 * self.n_corr - 1) * self.dt) * 33.3564
         freqs = np.arange(self.n_corr) * wn0
         win_norm = 1.0 / np.sqrt(2.0 * np.pi * self.sigma**2)
@@ -247,7 +272,7 @@ class FRESEAN(AnalysisBase):
         )
         win_freq[self.n_corr :] = win_freq[self.n_corr - 1 : 0 : -1]
         win_time = np.real(ifft(win_freq))
-
+        n_elements = self._n_elements
         self.results = Results(
             velocities=np.zeros((n_elements, self.n_frames), dtype=np.complex128),
             corr_matrix=np.empty((self.n_corr, n_elements, n_elements)),
@@ -255,6 +280,11 @@ class FRESEAN(AnalysisBase):
             win_time=win_time,
             n_dof=self._n_dof,
         )
+
+    def _prepare(self):
+        """Set things up before the analysis loop begins"""
+        self._init_run_metadata()
+        self._init_results_arrays()
 
     def _single_frame(self):
         """Calculate data from a single frame of trajectory"""
@@ -273,10 +303,8 @@ class FRESEAN(AnalysisBase):
 
     def _conclude(self):
         """Calculate the final results of the analysis"""
-        # This is an optional method that runs after
-        # _single_frame loops over the trajectory.
-        # It is useful for calculating the final results
-        # of the analysis.
+        if not hasattr(self, "_n_elements"):
+            self._init_run_metadata()
         n_elements = self._n_elements
         n_frames = self.n_frames
         n_corr = self.n_corr
