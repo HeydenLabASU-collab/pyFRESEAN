@@ -22,6 +22,15 @@ The rules for this file:
 - @amruthesht
 
 ### Added
+- ``FRESEAN`` ``n_jobs`` parameter for threaded :meth:`_conclude` work:
+  velocity cross-correlation matrix construction (parallel over row index
+  ``i``) and per-frequency :func:`numpy.linalg.eigh` diagonalization
+  (parallel over frequency bin); ``1`` or ``None`` serial, ``-1`` uses
+  :func:`os.cpu_count`. (PR #3)
+- MDAnalysis parallel trajectory support for ``FRESEAN`` via
+  ``run(n_workers=..., backend="multiprocessing")`` (velocity collection in
+  ``_single_frame``; aggregators for ``velocities``, ``freqs``, ``win_time``,
+  ``n_dof``, and ``corr_matrix``). (PR #3)
 - ``FRESEAN`` ``lag_symmetrization`` parameter: ``"mirror"`` (default,
   FRESEAN_tutorial notebooks) or ``"average"`` (averaging of positive and wrapped negative ``ifft`` lag bins). (PR #2)
 - Exact AA reconstruction from CG trajectories using COM-relative displacement
