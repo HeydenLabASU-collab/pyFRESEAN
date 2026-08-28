@@ -7,7 +7,9 @@ This module contains the :class:`FRESEAN` class.
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Literal, Union
+
+LagSymmetrization = Literal["mirror", "average"]
 
 import numpy as np
 from MDAnalysis.analysis.base import AnalysisBase, Results
@@ -41,6 +43,16 @@ class FRESEAN(AnalysisBase):
         Time step in the trajectory, in ps
     sigma: float
         Width of the Gaussian window function, in cm**-1
+    lag_symmetrization: "mirror" or "average"
+        How to enforce time symmetry of the correlation function after the
+        first inverse FFT. ``"mirror"`` (default) matches the FRESEAN_tutorial
+        notebooks: positive lags are taken from ``ifft`` indices ``0 … n_corr-1``
+        and the negative-lag half for the windowed FFT is built by reversing
+        those values. ``"average"`` matches ``gen-modes_omp.c``: for each lag
+        ``k > 0``, average ``ifft[k]`` with ``ifft[n_frames - k]`` (the wrapped
+        negative-lag bin from :func:`scipy.fft.ifft`), then mirror for the
+        second half. The latter is more appropriate for cross-correlations on
+        finite trajectories.
 
     Attributes
     ----------
@@ -75,6 +87,7 @@ class FRESEAN(AnalysisBase):
         n_corr: int = 500,
         dt: float = 0.004,
         sigma: float = 10.0,
+        lag_symmetrization: LagSymmetrization = "mirror",
         **kwargs,
     ):
         # the below line must be kept to initialize the AnalysisBase class!
@@ -91,6 +104,29 @@ class FRESEAN(AnalysisBase):
         self.n_corr = n_corr
         self.dt = dt
         self.sigma = sigma
+        if lag_symmetrization not in ("mirror", "average"):
+            raise ValueError(
+                "lag_symmetrization must be 'mirror' or 'average', "
+                f"got {lag_symmetrization!r}"
+            )
+        self.lag_symmetrization = lag_symmetrization
+
+    def _build_windowed_lags(
+        self,
+        tmp_time: np.ndarray,
+        n_corr: int,
+        n_frames: int,
+    ) -> np.ndarray:
+        """Pack symmetrized lags into the length ``2 * n_corr - 1`` FFT input."""
+        tmp_windowed = np.zeros(2 * n_corr - 1, dtype=np.float64)
+        if self.lag_symmetrization == "average":
+            tmp_windowed[0] = tmp_time[0]
+            for k in range(1, n_corr):
+                tmp_windowed[k] = (tmp_time[k] + tmp_time[n_frames - k]) / 2.0
+        else:
+            tmp_windowed[:n_corr] = tmp_time[:n_corr]
+        tmp_windowed[n_corr:] = tmp_windowed[n_corr - 1 : 0 : -1]
+        return tmp_windowed
 
     def _prepare(self):
         """Set things up before the analysis loop begins"""
@@ -149,16 +185,11 @@ class FRESEAN(AnalysisBase):
         corr_matrix = self.results.corr_matrix
         win_time = self.results.win_time
 
-        tmp_freq = np.zeros(n_frames, dtype=np.float64)
-        tmp_time = np.zeros(n_frames, dtype=np.float64)
-        tmp_windowed = np.zeros(2 * n_corr - 1, dtype=np.float64)
-
         for i in range(n_elements):
             for j in range(i, n_elements):
                 tmp_freq = np.real(velocities[i] * velocities[j].conj())
                 tmp_time = np.real(ifft(tmp_freq))
-                tmp_windowed[:n_corr] = tmp_time[:n_corr]
-                tmp_windowed[n_corr:] = tmp_time[n_corr - 1 : 0 : -1]
+                tmp_windowed = self._build_windowed_lags(tmp_time, n_corr, n_frames)
                 tmp_windowed *= win_time
                 corr_matrix[:, i, j] = np.real(fft(tmp_windowed)[:n_corr])
                 if i != j:
