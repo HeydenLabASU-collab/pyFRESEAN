@@ -67,10 +67,13 @@ See also the minimal notebooks in [`examples/`](examples/).
 ```bash
 pip install -e ".[test]"
 pytest                    # unit tests (default)
-pytest -m regression      # gas-50K FRESEAN regression (~90 s; may download trajectory)
+pytest -m pytutorial_ref   # vs Python tutorial reference (~90 s; may download trajectory)
+pytest -m c_ref           # vs FRESEAN COARSE (C) reference
 ```
 
-Regression reference: `pyfresean/tests/data/fresean_gas_50K_reference.npz` (see `pyfresean/tests/data/README.md`).
+Reference data:
+- `pyfresean/tests/data/fresean_pytutorial_ref/` — Python tutorial comparisons
+- `pyfresean/tests/data/fresean_c_ref/` — FRESEAN COARSE (C) comparisons
 
 ### Installation
 

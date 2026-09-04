@@ -22,6 +22,20 @@ The rules for this file:
 - @amruthesht
 
 ### Added
+- ``@pytest.mark.c_ref`` regression tests vs stored FRESEAN COARSE (C) for
+  alanine dipeptide (gas, 300 K) and HEWL in solution (303 K): CG
+  trajectory, eigenvalues, total VDoS, and eigenvectors; optional
+  ``--c-ref-plot`` PNG comparisons. (PR #4)
+- ``pyfresean.tests.c_ref`` helpers (``io``, ``paths``, ``plotting``,
+  per-system modules) and devtools ``generate_fresean_c_ref_*.py`` /
+  ``run_c_pipeline.sh`` scripts to regenerate stored C references under
+  ``tests/data/fresean_c_ref/``. (PR #4)
+- HEWL GROMACS inputs, SLURM/postprocess scripts, and
+  C reference data for solution-phase ``c_ref`` (large ``evec`` / MD
+  outputs gitignored). (PR #4)
+- ``pyfresean.tests.pytutorial_ref`` package; ala dipeptide (gas, 50 K)
+  pytutorial reference data under ``tests/data/fresean_pytutorial_ref/``.
+  (PR #4)
 - ``FRESEAN`` ``n_jobs`` parameter for threaded :meth:`_conclude` work:
   velocity cross-correlation matrix construction (parallel over row index
   ``i``) and per-frequency :func:`numpy.linalg.eigh` diagonalization
@@ -52,6 +66,8 @@ The rules for this file:
 <!-- Bug fixes -->
 
 ### Changed
+- ``c_ref`` FRESEAN comparisons use ``lag_symmetrization="average"`` to match
+  FRESEAN COARSE; tutorial notebooks keep ``"mirror"``. (PR #4)
 - ``FRESEAN`` default ``n_constraints`` is ``0`` for CG workflows. (PR #1)
 - Backmap load, arithmetic, and trajectory write use float32 to match CG and
   centered-vector file storage. (PR #1)

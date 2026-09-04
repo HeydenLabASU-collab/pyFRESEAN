@@ -93,6 +93,11 @@ class FRESEAN(AnalysisBase):
         :meth:`FRESEAN.run`
     """
 
+    # **NOTE**: Add instruction to run parallel
+    # export OMP_NUM_THREADS=4 
+    # taskset -c 0-3 python3 test_fresean.py (=2)
+    # python3 test_fresean.py (=2)
+
     _analysis_algorithm_is_parallelizable = True
 
     @classmethod
