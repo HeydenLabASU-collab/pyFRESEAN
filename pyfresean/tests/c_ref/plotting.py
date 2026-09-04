@@ -43,13 +43,14 @@ def plot_eigenvalues_vs_c(
     eval_dat: Path | str,
     output_path: Path | str,
     freq_indices: Sequence[int] = (0, 1),
-    n_modes: int = 12,
+    n_modes: int | None = 12,
     dpi: int = 150,
 ) -> Path:
     """
-    Save a figure comparing leading eigenvalues from pyfresean and C at selected frequencies.
+    Save a figure comparing eigenvalues from pyfresean and C at selected frequencies.
 
     One subplot per frequency: mode index vs eigenvalue, both series overlaid.
+    Pass ``n_modes=None`` to plot every CG degree of freedom.
     Format is inferred from ``output_path`` suffix (default PNG if unknown).
     """
     import matplotlib.pyplot as plt
@@ -63,33 +64,40 @@ def plot_eigenvalues_vs_c(
     freqs = analysis.results.freqs
 
     n_freq = len(freq_indices)
+    n_available = min(py_eval.shape[1], c_eval.shape[1])
+    n_plot = n_available if n_modes is None else min(n_modes, n_available)
+    fig_width = 6 if n_plot <= 40 else min(14, 6 + n_plot / 120)
     fig, axs = plt.subplots(
         n_freq,
         1,
-        figsize=(6, 1.4 * n_freq),
+        figsize=(fig_width, 1.4 * n_freq),
         sharex=True,
         squeeze=False,
     )
 
     for row, freq_index in enumerate(freq_indices):
         ax = axs[row, 0]
-        n_plot = min(n_modes, py_eval.shape[1], c_eval.shape[1])
+        n_available = min(py_eval.shape[1], c_eval.shape[1])
+        n_plot = n_available if n_modes is None else min(n_modes, n_available)
         mode_numbers = np.arange(1, n_plot + 1)
+        marker = "o" if n_plot <= 40 else None
         ax.plot(
             mode_numbers,
             py_eval[freq_index, :n_plot],
-            "o-",
+            "-",
+            marker=marker,
             color="C0",
             label="pyfresean",
-            markersize=4,
+            markersize=3,
         )
         ax.plot(
             mode_numbers,
             c_eval[freq_index, :n_plot],
-            "s--",
+            "--",
+            marker="s" if marker else None,
             color="C1",
             label="FRESEAN COARSE (C)",
-            markersize=4,
+            markersize=3,
         )
         freq_cm1 = freqs[freq_index]
         ax.set_ylabel(f"λ @ {freq_cm1:.2f} cm$^{-1}$")

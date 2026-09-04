@@ -38,24 +38,24 @@ UniverseSource = Union[
 CenteredSource = Union[str, Path, np.ndarray]
 
 
-    @dataclass
+@dataclass
 class CoarseGrainMap:
-        """Maps coarse-grained beads to atoms in a source atom group."""
+    """Maps coarse-grained beads to atoms in a source atom group."""
 
-        bead_names: List[str]
-        bead_masses: np.ndarray
-        resindices: np.ndarray
-        resnames: List[str]
-        bead_types: List[str]
-        atom_indices: List[np.ndarray]
+    bead_names: List[str]
+    bead_masses: np.ndarray
+    resindices: np.ndarray
+    resnames: List[str]
+    bead_types: List[str]
+    atom_indices: List[np.ndarray]
     n_constraints: float = 0.0
     reference_centered_coords: List[np.ndarray] = field(default_factory=list)
     reference_centered_velocities: List[np.ndarray] = field(default_factory=list)
     reference_frame: int = 0
 
-        @property
-        def n_beads(self) -> int:
-            return len(self.bead_names)
+    @property
+    def n_beads(self) -> int:
+        return len(self.bead_names)
 
 
 MapSource = Union[CoarseGrainMap, str, Path]

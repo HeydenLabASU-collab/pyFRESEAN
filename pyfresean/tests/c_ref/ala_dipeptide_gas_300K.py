@@ -276,18 +276,23 @@ def compare_fresean_eigenvectors_to_c(
     analysis: FRESEAN,
     evec_mmat: Path,
     freq_indices: tuple[int, ...] = (0, 1),
-    n_modes: int = 12,
+    n_modes: int | None = 12,
     min_correlation: float = 0.99,
 ) -> dict[str, float]:
     c_evec = load_c_evec_mmat(evec_mmat, n_corr=analysis.n_corr)
     py_evec = analysis.results.eigenvectors
+    n_compare = min(
+        py_evec.shape[1],
+        c_evec.shape[1],
+        n_modes if n_modes is not None else py_evec.shape[1],
+    )
     metrics = {}
     for freq_index in freq_indices:
         corr = max_abs_eigenvector_correlation(
             py_evec,
             c_evec,
             freq_index,
-            min(n_modes, py_evec.shape[1], c_evec.shape[1]),
+            n_compare,
         )
         metrics[f"max_mode_correlation_freq_{freq_index}"] = corr
         if corr < min_correlation:

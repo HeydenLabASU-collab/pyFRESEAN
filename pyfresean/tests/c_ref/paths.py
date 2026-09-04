@@ -21,6 +21,11 @@ def ala_dipeptide_gas_300K_reference_dir() -> Path:
     return fresean_c_ref_root() / "ala_dipeptide_gas_300K"
 
 
+def hewl_solution_303K_reference_dir() -> Path:
+    """Stored C reference for HEWL in solution (303 K)."""
+    return fresean_c_ref_root() / "hewl_solution_303K"
+
+
 def ala_dipeptide_input_root() -> Path:
     """
     Input trajectories for alanine dipeptide c_ref tests.
