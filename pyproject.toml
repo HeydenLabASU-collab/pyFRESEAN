@@ -39,6 +39,7 @@ test = [
     "pytest>=6.0",
     "pytest-xdist>=2.5",
     "pytest-cov>=3.0",
+    "matplotlib>=3.5",
 ]
 examples = [
     "matplotlib>=3.5",
@@ -63,9 +64,10 @@ testpaths = [
 ]
 markers = [
     "slow: tests that use full MD trajectories",
-    "regression: checks against stored FRESEAN reference data",
+    "pytutorial_ref: compares pyfresean to stored FRESEAN Python tutorial reference",
+    "c_ref: compares pyfresean to FRESEAN COARSE (C) outputs",
 ]
-addopts = "-m 'not slow and not regression'"
+addopts = "-m 'not slow and not pytutorial_ref and not c_ref'"
 
 [tool.black]
 line-length = 80

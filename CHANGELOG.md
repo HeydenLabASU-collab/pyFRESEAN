@@ -22,6 +22,12 @@ The rules for this file:
 - @amruthesht
 
 ### Added
+- Alanine dipeptide (gas, 300 K) comparison helpers against FRESEAN COARSE (C):
+  coarse-graining trajectory checks and FRESEAN eigenvalue/eigenvector
+  validation (`pyfresean.tests.c_ref` for FRESEAN COARSE comparisons;
+  ``pyfresean.tests.pytutorial_ref`` for Python tutorial comparisons;
+  stored references under ``pyfresean/tests/data/fresean_c_ref/`` and
+  ``pyfresean/tests/data/fresean_pytutorial_ref/``).
 - ``FRESEAN`` ``n_jobs`` parameter for threaded :meth:`_conclude` work:
   velocity cross-correlation matrix construction (parallel over row index
   ``i``) and per-frequency :func:`numpy.linalg.eigh` diagonalization

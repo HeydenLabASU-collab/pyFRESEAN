@@ -1,4 +1,4 @@
-"""Trajectory paths and downloads for regression tests."""
+"""Input data helpers for alanine dipeptide (gas, 50 K) pytutorial_ref tests."""
 
 from __future__ import annotations
 
@@ -6,7 +6,9 @@ import os
 import urllib.request
 from pathlib import Path
 
-REFERENCE_NPZ = Path(__file__).resolve().parent / "data" / "fresean_gas_50K_reference.npz"
+from pyfresean.tests.pytutorial_ref.paths import _project_root, ala_dipeptide_gas_50K_reference_npz
+
+REFERENCE_NPZ = ala_dipeptide_gas_50K_reference_npz()
 
 GAS_50K_TOPOL_URL = (
     "https://www.dropbox.com/scl/fi/dz5q0x8cxm268t5hveua3/topol.tpr?"
@@ -23,10 +25,10 @@ def tutorial_data_root() -> Path:
     env = os.environ.get("PYFRESEAN_TEST_DATA")
     if env:
         return Path(env).expanduser().resolve()
-    nested = Path(__file__).resolve().parents[2] / "examples" / "input_data"
+    nested = _project_root() / "examples" / "input_data"
     if nested.is_dir() and (nested / "harmonic-normal-modes" / "min.xyz").exists():
         return nested
-    legacy = Path(__file__).resolve().parents[3] / "data"
+    legacy = _project_root().parent / "data"
     if legacy.is_dir():
         return legacy
     cache = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "pyfresean-test-data"
@@ -36,7 +38,7 @@ def tutorial_data_root() -> Path:
 def _download(url: str, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists():
-        print(f"Downloading regression data: {path.name} ...")
+        print(f"Downloading pytutorial_ref input data: {path.name} ...")
         urllib.request.urlretrieve(url, path)
 
 
@@ -48,14 +50,16 @@ def ensure_gas_50k_data(data_root: Path | None = None) -> Path:
     ref = root / "harmonic-normal-modes" / "min.xyz"
 
     if not ref.exists():
-        nested_ref = Path(__file__).resolve().parents[2] / "examples" / "input_data" / "harmonic-normal-modes" / "min.xyz"
-        if not nested_ref.exists():
-            nested_ref = Path(__file__).resolve().parents[3] / "data" / "harmonic-normal-modes" / "min.xyz"
+        nested_ref = _project_root() / "examples" / "input_data" / "harmonic-normal-modes" / "min.xyz"
+        legacy_ref = _project_root().parent / "data" / "harmonic-normal-modes" / "min.xyz"
         if nested_ref.exists():
             root = nested_ref.parents[1]
             ref = nested_ref
-            topol = root / "MD-gas-50K" / "topol.tpr"
-            traj = root / "MD-gas-50K" / "traj.trr"
+        elif legacy_ref.exists():
+            root = legacy_ref.parents[1]
+            ref = legacy_ref
+        topol = root / "MD-gas-50K" / "topol.tpr"
+        traj = root / "MD-gas-50K" / "traj.trr"
 
     _download(GAS_50K_TOPOL_URL, topol)
     _download(GAS_50K_TRAJ_URL, traj)

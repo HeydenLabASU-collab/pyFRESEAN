@@ -1,4 +1,4 @@
-"""Regression tests for gas-50K alanine dipeptide FRESEAN."""
+"""Regression tests for alanine dipeptide (gas, 50 K) FRESEAN vs tutorial reference."""
 
 from __future__ import annotations
 
@@ -8,7 +8,8 @@ import MDAnalysis as mda
 
 from pyfresean import Align, FRESEAN
 from pyfresean.postprocess import low_frequency_peaks
-from pyfresean.tests.regression_data import REFERENCE_NPZ, ensure_gas_50k_data
+from pyfresean.tests.pytutorial_ref.ala_dipeptide_gas_50K import ensure_gas_50k_data
+from pyfresean.tests.pytutorial_ref.paths import ala_dipeptide_gas_50K_reference_npz
 
 
 @pytest.fixture(scope="module")
@@ -21,9 +22,10 @@ def gas_50k_data_root():
 
 @pytest.fixture(scope="module")
 def fresean_gas_50k_reference():
-    if not REFERENCE_NPZ.exists():
-        pytest.skip(f"missing reference file: {REFERENCE_NPZ}")
-    return np.load(REFERENCE_NPZ)
+    reference_npz = ala_dipeptide_gas_50K_reference_npz()
+    if not reference_npz.exists():
+        pytest.skip(f"missing reference file: {reference_npz}")
+    return np.load(reference_npz)
 
 
 @pytest.fixture(scope="module")
@@ -53,9 +55,9 @@ def fresean_gas_50k_analysis(gas_50k_data_root):
 
 
 @pytest.mark.slow
-@pytest.mark.regression
-class TestFRESEANGas50KRegression:
-    """Check FRESEAN against stored gas-50K reference data."""
+@pytest.mark.pytutorial_ref
+class TestFRESEANAlaDipeptideGas50KRegression:
+    """Check FRESEAN against stored gas-50K tutorial reference data."""
 
     def test_run_metadata(self, fresean_gas_50k_analysis, fresean_gas_50k_reference):
         ref = fresean_gas_50k_reference

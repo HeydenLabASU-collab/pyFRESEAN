@@ -118,8 +118,11 @@ jobs:
     - name: Install package
       run: python -m pip install . --no-deps
 
-    - name: Run FRESEAN gas-50K regression tests
-      run: pytest -m regression -v --tb=short pyfresean/tests/test_fresean_regression_gas_50k.py
+    - name: Run FRESEAN ala dipeptide gas-50K pytutorial_ref tests
+      run: pytest -m pytutorial_ref -v --tb=short pyfresean/tests/test_fresean_regression_ala_dipeptide_gas_50K_pytutorial_ref.py
+
+    - name: Run FRESEAN ala dipeptide gas-300K c_ref tests
+      run: pytest -m c_ref -v --tb=short pyfresean/tests/test_fresean_regression_ala_dipeptide_gas_300K_c_ref.py
 
     - name: codecov
       if: github.repository == 'amruthesht/pyfresean' && github.event_name != 'schedule'

@@ -1,14 +1,11 @@
-"""Regenerate ``fresean_gas_50K_reference.npz`` for regression tests.
+"""Regenerate ``fresean_gas_50K_reference.npz`` for ala dipeptide (gas, 50 K) pytutorial_ref tests.
 
 Same FRESEAN setup as ``examples/01_MD-alanine-dipeptide-gas-50K.ipynb``.
 
 Usage::
 
-    python devtools/scripts/generate_fresean_regression_reference.py \\
+    python devtools/scripts/generate_fresean_pytutorial_ref_ala_dipeptide_gas_50K.py \\
         --data-dir examples/input_data
-
-Point ``--data-dir`` or ``PYFRESEAN_TEST_DATA`` at a tree with ``MD-gas-50K/``
-and ``harmonic-normal-modes/min.xyz`` if the data are not under ``examples/input_data``.
 """
 
 from __future__ import annotations
@@ -32,6 +29,18 @@ def default_data_dir() -> Path:
     if env:
         return Path(env)
     return Path(__file__).resolve().parents[2] / "examples" / "input_data"
+
+
+def default_output_npz() -> Path:
+    return (
+        Path(__file__).resolve().parents[2]
+        / "pyfresean"
+        / "tests"
+        / "data"
+        / "fresean_pytutorial_ref"
+        / "ala_dipeptide_gas_50K"
+        / "fresean_gas_50K_reference.npz"
+    )
 
 
 def run_fresean_gas_50k(data_dir: Path) -> dict:
@@ -95,11 +104,7 @@ def main() -> None:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path(__file__).resolve().parents[2]
-        / "pyfresean"
-        / "tests"
-        / "data"
-        / "fresean_gas_50K_reference.npz",
+        default=default_output_npz(),
         help="Output .npz path",
     )
     args = parser.parse_args()

@@ -111,6 +111,7 @@ examples/input_data/**/*.tpr
 examples/input_data/MD-water-300K/
 examples/input_data/MD-gas-50K/
 examples/input_data/MD-gas-300K/
+examples/input_data/MD-gas-300K-CG/
 
 # mypy
 .mypy_cache/
@@ -118,3 +119,17 @@ examples/input_data/MD-gas-300K/
 
 # poetry
 poetry.lock
+
+# pytutorial_ref pipeline staging (reference data lives in tests/data/fresean_pytutorial_ref/)
+# c_ref COARSE pipeline staging (reference data lives in tests/data/fresean_c_ref/)
+devtools/scripts/fresean_c_ref/ala_dipeptide_gas_300K/output/
+
+# Ignore COARSE pipeline intermediates accidentally left in c_ref data dirs
+pyfresean/tests/data/fresean_c_ref/ala_dipeptide_gas_300K/*.inp
+pyfresean/tests/data/fresean_c_ref/ala_dipeptide_gas_300K/*.mtop
+pyfresean/tests/data/fresean_c_ref/ala_dipeptide_gas_300K/*.gro
+pyfresean/tests/data/fresean_c_ref/ala_dipeptide_gas_300K/*.job
+pyfresean/tests/data/fresean_c_ref/ala_dipeptide_gas_300K/aa.trr
+pyfresean/tests/data/fresean_c_ref/ala_dipeptide_gas_300K/covar_cg.mmat
+pyfresean/tests/data/fresean_c_ref/ala_dipeptide_gas_300K/.*_offsets.npz
+pyfresean/tests/data/fresean_c_ref/ala_dipeptide_gas_300K/plots/
