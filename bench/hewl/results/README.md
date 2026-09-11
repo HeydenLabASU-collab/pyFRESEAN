@@ -1,16 +1,20 @@
 # HEWL benchmark results
 
-Spectral sweep outputs only. One-time CG lives in `../cg_reference/`.
+Spectral sweep outputs. One-time reference inputs live in `../cg_reference/` and `../aa_reference/`.
 
 ```
 results/
-├── c_spectral/     # --mode c_spectral
-├── py_cases/       # --mode py_fresean
-└── plots/          # collect_results.py --plot
+├── results_cg/
+│   ├── c_spectral/
+│   ├── py_cases/
+│   └── plots/
+└── results_aa/
+    ├── c_spectral/
+    ├── py_cases/
+    └── plots/
 ```
 
-CG timings: `../cg_reference/pyfresean/result.json`, `../cg_reference/c_ref/result.json`
-
 ```bash
-python bench/hewl/collect_results.py --case all --plot
+python bench/hewl/collect_results.py --system cg --case all --plot
+python bench/hewl/collect_results.py --system aa --case omp_n_njobs_1 --plot
 ```

@@ -12,10 +12,17 @@ bench/hewl/
 ├── cg_reference/      # one-time CG (gitignored except README)
 │   ├── c_ref/
 │   └── pyfresean/
+├── aa_reference/      # one-time AA inputs for C (gitignored except README)
+│   └── c_ref/
 └── results/           # spectral sweeps (gitignored except README)
-    ├── c_spectral/
-    ├── py_cases/
-    └── plots/
+    ├── results_cg/
+    │   ├── c_spectral/
+    │   ├── py_cases/
+    │   └── plots/
+    └── results_aa/
+        ├── c_spectral/
+        ├── py_cases/
+        └── plots/
 ```
 
 ## Modes
@@ -24,8 +31,9 @@ bench/hewl/
 |------|------|--------|
 | `py_cg` | py coarse-grain once | `cg_reference/pyfresean/` |
 | `c_cg` | C `fresean coarse` once | `cg_reference/c_ref/` |
-| `py_fresean` | py spectral sweep | `results/py_cases/{case}/` |
-| `c_spectral` | C covar+eigen sweep | `results/c_spectral/` |
+| `c_aa` | C all-atom inputs once | `aa_reference/c_ref/` |
+| `py_fresean` | py spectral sweep | `results/results_{cg,aa}/py_cases/{case}/` |
+| `c_spectral` | C covar+eigen sweep | `results/results_{cg,aa}/c_spectral/` |
 
 Plots compare `py_fresean` vs `c_spectral` only (CG excluded from both sides).
 
@@ -53,7 +61,8 @@ bash bench/hewl/submit.sh all
 Plot:
 
 ```bash
-python bench/hewl/collect_results.py --case all --plot
+python bench/hewl/collect_results.py --system cg --case all --plot
+python bench/hewl/collect_results.py --system aa --case omp_n_njobs_1 --plot
 ```
 
 ## `py_fresean` cases

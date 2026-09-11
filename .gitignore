@@ -154,5 +154,7 @@ pyfresean/tests/data/fresean_c_ref/hewl_solution_303K/evec_covar_cg.mmat
 # HEWL pyfresean vs C benchmarks (generated artifacts; READMEs tracked)
 bench/hewl/cg_reference/*
 !bench/hewl/cg_reference/README.md
+bench/hewl/aa_reference/*
+!bench/hewl/aa_reference/README.md
 bench/hewl/results/*
 !bench/hewl/results/README.md

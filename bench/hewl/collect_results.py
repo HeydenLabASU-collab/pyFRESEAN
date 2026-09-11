@@ -28,18 +28,17 @@ from pyfresean.benchmark_keys import (
 )
 
 BENCH_DIR = Path(__file__).resolve().parent
-RESULTS = BENCH_DIR / "results"
+RESULTS_ROOT = BENCH_DIR / "results"
 CG_REF = BENCH_DIR / "cg_reference" / "pyfresean"
-C_SPECTRAL = RESULTS / "c_spectral"
-PY_CASES = RESULTS / "py_cases"
-PLOTS = RESULTS / "plots"
 CPU_COUNTS = (1, 2, 4, 8, 16, 32, 48)
+SYSTEMS = ("cg", "aa")
 
 CASE_LABELS = {
     "omp1_njobs_n_nworkers_1": "OMP=1, n_jobs=N, n_workers=1",
     "omp1_njobs_n_nworkers_2": "OMP=1, n_jobs=N, n_workers=min(2,N)",
     "omp1_njobs_n_nworkers_n": "OMP=1, n_jobs=N, n_workers=N",
     "omp_n_njobs_1": "OMP=N, n_jobs=1, n_workers=1",
+    "omp_n_njobs_1_vec": "OMP=N, n_jobs=1, n_workers=1 (vectorized)",
 }
 
 LEGACY_BENCH_KEYS = {
@@ -50,6 +49,22 @@ LEGACY_BENCH_KEYS = {
     BENCH_T_C_EIGEN: "c_eigen_s",
     BENCH_T_C_TOTAL: "c_total_s",
 }
+
+
+def results_root(system: str) -> Path:
+    return RESULTS_ROOT / f"results_{system}"
+
+
+def c_spectral_dir(system: str) -> Path:
+    return results_root(system) / "c_spectral"
+
+
+def py_cases_dir(system: str) -> Path:
+    return results_root(system) / "py_cases"
+
+
+def plots_dir(system: str) -> Path:
+    return results_root(system) / "plots"
 
 
 def bench_value(row: dict | None, key: str) -> float:
@@ -115,6 +130,8 @@ def plot_total_overview(
     case_rows: dict[str, list[dict]],
     c_rows: list[dict],
     plot_path: Path,
+    *,
+    system: str,
 ) -> None:
     import matplotlib.pyplot as plt
 
@@ -144,7 +161,9 @@ def plot_total_overview(
 
     ax.set_xlabel("CPUs")
     ax.set_ylabel("wall time (s)")
-    ax.set_title("HEWL spectral time — pyfresean FRESEAN vs C covar+eigen")
+    ax.set_title(
+        f"HEWL {system.upper()} spectral time — pyfresean FRESEAN vs C covar+eigen"
+    )
     _setup_log_axis(ax, ncpus_ref or list(CPU_COUNTS))
     ax.legend(fontsize=8)
     fig.tight_layout()
@@ -158,6 +177,8 @@ def plot_case_total(
     rows: list[dict],
     c_rows: list[dict],
     plot_path: Path,
+    *,
+    system: str,
 ) -> None:
     import matplotlib.pyplot as plt
 
@@ -181,7 +202,9 @@ def plot_case_total(
 
     ax.set_xlabel("CPUs")
     ax.set_ylabel("wall time (s)")
-    ax.set_title(f"HEWL spectral time — {CASE_LABELS.get(case, case)}")
+    ax.set_title(
+        f"HEWL {system.upper()} spectral — {CASE_LABELS.get(case, case)}"
+    )
     _setup_log_axis(ax, ncpus)
     ax.legend(fontsize=8)
     fig.tight_layout()
@@ -194,6 +217,8 @@ def plot_case_breakdown(
     case: str,
     rows: list[dict],
     plot_path: Path,
+    *,
+    system: str,
 ) -> None:
     import matplotlib.pyplot as plt
 
@@ -224,7 +249,9 @@ def plot_case_breakdown(
         linewidth=1.5,
         label="FRESEAN total",
     )
-    ax.set_title(f"pyfresean FRESEAN breakdown — {CASE_LABELS.get(case, case)}")
+    ax.set_title(
+        f"pyfresean {system.upper()} breakdown — {CASE_LABELS.get(case, case)}"
+    )
     ax.set_xlabel("CPUs")
     ax.set_ylabel("wall time (s)")
     _setup_log_axis(ax, ncpus)
@@ -262,8 +289,10 @@ def plot_cg_reference(plot_path: Path) -> None:
     plt.close(fig)
 
 
-def print_table(case: str, rows: list[dict], c_rows: list[dict]) -> None:
-    print(f"\n=== {CASE_LABELS.get(case, case)} ===")
+def print_table(
+    system: str, case: str, rows: list[dict], c_rows: list[dict]
+) -> None:
+    print(f"\n=== {system.upper()} — {CASE_LABELS.get(case, case)} ===")
     print(f"{'ncpus':>5}  {'bench_t_py_fresean':>18}  {'bench_t_c_total':>16}")
     c_map = {int(r["ncpus"]): r for r in c_rows}
     for r in rows:
@@ -273,8 +302,63 @@ def print_table(case: str, rows: list[dict], c_rows: list[dict]) -> None:
         print(f"{n:5d}  {py_f:18.2f}  {c_total:16.2f}")
 
 
+def collect_system(
+    system: str,
+    cases: list[str],
+    *,
+    plot: bool,
+) -> dict[str, list[dict]]:
+    c_rows = load_results(c_spectral_dir(system))
+    case_rows: dict[str, list[dict]] = {}
+    plots = plots_dir(system)
+
+    for case in cases:
+        case_dir = py_cases_dir(system) / case
+        rows = load_results(case_dir)
+        case_rows[case] = rows
+        if not rows:
+            print(f"No results in {case_dir}", file=sys.stderr)
+            continue
+        write_summary(rows, case_dir / "summary.csv")
+        print_table(system, case, rows, c_rows)
+        if plot:
+            plot_case_total(
+                case,
+                rows,
+                c_rows,
+                plots / case / "total_vs_c.png",
+                system=system,
+            )
+            plot_case_breakdown(
+                case,
+                rows,
+                plots / case / "breakdown.png",
+                system=system,
+            )
+            print(f"Wrote {plots / case}")
+
+    if plot and case_rows:
+        plot_total_overview(
+            case_rows,
+            c_rows,
+            plots / "total_all_cases.png",
+            system=system,
+        )
+        if system == "cg":
+            plot_cg_reference(plots / "cg_reference_breakdown.png")
+        print(f"Wrote {plots / 'total_all_cases.png'}")
+
+    return case_rows
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--system",
+        choices=[*SYSTEMS, "all"],
+        default="cg",
+        help="result tree: results_cg or results_aa (or both)",
+    )
     parser.add_argument(
         "--case",
         choices=list(CASE_LABELS) + ["all"],
@@ -283,28 +367,10 @@ def main() -> None:
     parser.add_argument("--plot", action="store_true")
     args = parser.parse_args()
 
-    c_rows = load_results(C_SPECTRAL)
     cases = list(CASE_LABELS) if args.case == "all" else [args.case]
-    case_rows: dict[str, list[dict]] = {}
-
-    for case in cases:
-        case_dir = PY_CASES / case
-        rows = load_results(case_dir)
-        case_rows[case] = rows
-        if not rows:
-            print(f"No results in {case_dir}", file=sys.stderr)
-            continue
-        write_summary(rows, case_dir / "summary.csv")
-        print_table(case, rows, c_rows)
-        if args.plot:
-            plot_case_total(case, rows, c_rows, PLOTS / case / "total_vs_c.png")
-            plot_case_breakdown(case, rows, PLOTS / case / "breakdown.png")
-            print(f"Wrote {PLOTS / case}")
-
-    if args.plot:
-        plot_total_overview(case_rows, c_rows, PLOTS / "total_all_cases.png")
-        plot_cg_reference(PLOTS / "cg_reference_breakdown.png")
-        print(f"Wrote {PLOTS / 'total_all_cases.png'}")
+    systems = list(SYSTEMS) if args.system == "all" else [args.system]
+    for system in systems:
+        collect_system(system, cases, plot=args.plot)
 
 
 if __name__ == "__main__":
