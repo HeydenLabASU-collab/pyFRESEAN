@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """Benchmark pyfresean vs FRESEAN COARSE (C) on HEWL.
 
-Modes (use separately for clean sweeps):
-  cg      — pyfresean coarse-grain once; writes cg_reference/pyfresean/
-  fresean — spectral only (loads cg_reference/pyfresean to node-local tmp)
-  c       — C covar+eigen only (workdir on node-local tmp)
-  all     — cg + fresean + c in one process (legacy convenience)
+Modes (run separately for clean sweeps):
+  py_cg       — pyfresean coarse-grain once → cg_reference/pyfresean/
+  c_cg        — C fresean coarse once       → cg_reference/c_ref/
+  py_fresean  — py spectral only (loads py CG cache)
+  c_spectral  — C covar+eigen only (reads c_ref inputs)
+  all         — py CG + py FRESEAN + C spectral in one process (legacy)
+
+Legacy aliases: cg → py_cg, fresean → py_fresean, c → c_spectral.
 """
 
 from __future__ import annotations
@@ -27,6 +30,7 @@ import MDAnalysis as mda
 
 from pyfresean import Align, FRESEAN
 from pyfresean.benchmark_keys import (
+    BENCH_T_C_COARSE,
     BENCH_T_C_COVAR,
     BENCH_T_C_EIGEN,
     BENCH_T_C_TOTAL,
@@ -55,8 +59,16 @@ DEFAULT_CG_CACHE = DEFAULT_PY_CG_INPUTS
 DEFAULT_C_SPECTRAL = DEFAULT_RESULTS / "c_spectral"
 DEFAULT_PY_CASES = DEFAULT_RESULTS / "py_cases"
 DEFAULT_FRESEAN_BIN = os.environ.get("FRESEAN_BIN", "fresean")
+DEFAULT_GMX = os.environ.get("GMX", "gmx")
 WIN_SIGMA = 10.0
 CPU_COUNTS = (1, 2, 4, 8, 16, 32, 48)
+
+MODES = ("py_cg", "c_cg", "py_fresean", "c_spectral", "all")
+MODE_ALIASES = {
+    "cg": "py_cg",
+    "fresean": "py_fresean",
+    "c": "c_spectral",
+}
 
 CaseResolver = Callable[[int], tuple[int, int, int]]
 
@@ -66,6 +78,8 @@ BENCH_CASES: dict[str, CaseResolver] = {
     "omp1_njobs_n_nworkers_n": lambda n: (1, n, n),
     "omp_n_njobs_1": lambda n: (n, 1, 1),
 }
+
+CG_MODES = frozenset({"py_cg", "c_cg"})
 
 
 @dataclass
@@ -82,14 +96,20 @@ class BenchmarkResult:
     bench_t_py_coarse: float
     bench_t_py_fresean: float
     bench_t_py_total: float
+    bench_t_c_coarse: float
     bench_t_c_covar: float
     bench_t_c_eigen: float
     bench_t_c_total: float
     py_coarse: dict[str, float] | None
     py_fresean: dict[str, float] | None
+    c_coarse: dict[str, float] | None
     n_frames: int
     n_corr: int
     dt_ps: float
+
+
+def normalize_mode(mode: str) -> str:
+    return MODE_ALIASES.get(mode, mode)
 
 
 def _tmp_root() -> Path:
@@ -129,15 +149,140 @@ def _set_py_thread_env(omp_threads: int = 1) -> None:
         os.environ[var] = str(omp_threads)
 
 
-def _ensure_c_inputs(c_inputs_dir: Path) -> None:
-    topol = c_inputs_dir / "topol-cg.mtop"
-    ref = c_inputs_dir / "ref-cg.gro"
-    if topol.is_file() and ref.is_file():
+def _c_cg_inputs_ready(output_dir: Path) -> bool:
+    return (output_dir / "topol-cg.mtop").is_file() and (
+        output_dir / "ref-cg.gro"
+    ).is_file()
+
+
+def run_c_cg_reference(
+    n_frames: int,
+    output_dir: Path,
+    *,
+    force: bool = False,
+) -> tuple[float, dict[str, float]]:
+    if not force and _c_cg_inputs_ready(output_dir):
+        print(f"C CG inputs already present: {output_dir}")
+        result_json = output_dir / "result.json"
+        if result_json.is_file():
+            data = json.loads(result_json.read_text())
+            phases = data.get("c_coarse") or {}
+            total = float(data.get(BENCH_T_C_COARSE, phases.get(BENCH_T_TOTAL, 0.0)))
+            return total, phases
+        return 0.0, {}
+
+    paths = resolve_hewl_solution_303K_paths()
+    for path in (paths.aa_topol, paths.aa_traj, paths.topol_prot):
+        if not path.is_file():
+            raise FileNotFoundError(f"missing HEWL input: {path}")
+
+    if output_dir.exists():
+        shutil.rmtree(output_dir)
+    output_dir.mkdir(parents=True)
+    work = output_dir
+    fresean_bin = DEFAULT_FRESEAN_BIN
+    gmx = DEFAULT_GMX
+    phases: dict[str, float] = {}
+
+    shutil.copy2(paths.script_dir / "static.job", work / "static.job")
+
+    t_mtop = time.perf_counter()
+    subprocess.run(
+        [
+            fresean_bin,
+            "mtop",
+            "-p",
+            str(paths.topol_prot),
+        ],
+        cwd=work,
+        input=f"{paths.topol_prot}\n{paths.topol_prot}\ntopol-aa.mtop\n",
+        text=True,
+        check=True,
+    )
+    phases["bench_t_mtop"] = time.perf_counter() - t_mtop
+
+    trj_end = n_frames * DT_PS
+    t_trjconv = time.perf_counter()
+    subprocess.run(
+        [
+            gmx,
+            "trjconv",
+            "-s",
+            str(paths.aa_topol),
+            "-f",
+            str(paths.aa_traj),
+            "-o",
+            "aa.trr",
+            "-b",
+            "0",
+            "-e",
+            str(trj_end),
+        ],
+        cwd=work,
+        input="0\n",
+        text=True,
+        check=True,
+    )
+    phases["bench_t_trjconv"] = time.perf_counter() - t_trjconv
+
+    coarse_inp = work / "coarse.inp"
+    coarse_inp.write_text(
+        f"""#fnTop
+topol-aa.mtop
+#fnCrd
+aa.trr
+#fnVel
+#fnJob
+static.job
+#grp
+0
+#nRead
+{n_frames}
+#nSample
+1
+#fnOutTraj
+tmptraj.gro
+#fnOutTopol
+topol-cg.mtop
+"""
+    )
+
+    t_coarse = time.perf_counter()
+    subprocess.run(
+        [fresean_bin, "coarse", "-f", "coarse.inp"],
+        cwd=work,
+        check=True,
+    )
+    phases["bench_t_coarse"] = time.perf_counter() - t_coarse
+
+    tmptraj = work / "tmptraj.gro"
+    n_atoms = int(tmptraj.read_text().splitlines()[1].strip())
+    n_lines = n_atoms + 3
+    (work / "ref-cg.gro").write_text(
+        "".join(tmptraj.read_text().splitlines(True)[:n_lines])
+    )
+
+    for name in ("tmptraj.gro", "aa.trr", "topol-aa.mtop", "coarse.inp"):
+        (work / name).unlink(missing_ok=True)
+
+    traj_link = work / "traj-cg.trr"
+    if traj_link.exists() or traj_link.is_symlink():
+        traj_link.unlink()
+    traj_src = paths.data_dir / "traj-cg.trr"
+    traj_link.symlink_to(traj_src.resolve())
+
+    phases[BENCH_T_TOTAL] = (
+        phases["bench_t_mtop"]
+        + phases["bench_t_trjconv"]
+        + phases["bench_t_coarse"]
+    )
+    return phases[BENCH_T_TOTAL], phases
+
+
+def _ensure_c_inputs(c_inputs_dir: Path, n_frames: int, force: bool = False) -> None:
+    if not force and _c_cg_inputs_ready(c_inputs_dir):
         return
-    setup = BENCH_DIR / "prepare_c_covar_inputs.sh"
-    if not setup.is_file():
-        raise FileNotFoundError(f"missing setup script: {setup}")
-    subprocess.run(["bash", str(setup)], check=True)
+    run_c_cg_reference(n_frames, c_inputs_dir, force=force)
 
 
 def _write_covar_inp(workdir: Path, n_frames: int, n_corr: int) -> Path:
@@ -222,7 +367,7 @@ def _load_cg_universe(cache_dir: Path) -> tuple[CoarseGrain, mda.Universe]:
     return cg, u_cg
 
 
-def run_cg_reference(n_frames: int, output_dir: Path) -> tuple[dict[str, float], Path]:
+def run_py_cg_reference(n_frames: int, output_dir: Path) -> tuple[dict[str, float], Path]:
     _set_py_thread_env(1)
     paths = resolve_hewl_solution_303K_paths()
     local_tpr, local_trj = _localize_aa_trajectory(paths)
@@ -242,7 +387,7 @@ def run_cg_reference(n_frames: int, output_dir: Path) -> tuple[dict[str, float],
     return phases, output_dir
 
 
-def run_fresean_only(
+def run_py_fresean_only(
     cg_cache_dir: Path,
     n_jobs: int,
     n_workers: int,
@@ -346,7 +491,7 @@ def _prepare_c_workdir(c_inputs_dir: Path, workdir: Path) -> None:
             shutil.copy2(src, dest)
 
 
-def run_c_benchmark(
+def run_c_spectral(
     ncpus: int,
     c_inputs_dir: Path,
     n_frames: int,
@@ -356,7 +501,7 @@ def run_c_benchmark(
     _prepare_c_workdir(c_inputs_dir, local_work)
     _write_covar_inp(local_work, n_frames=n_frames, n_corr=N_CORR)
 
-    fresean_bin = str(DEFAULT_FRESEAN_BIN)
+    fresean_bin = DEFAULT_FRESEAN_BIN
     env = os.environ.copy()
     env["OMP_NUM_THREADS"] = str(ncpus)
 
@@ -395,7 +540,7 @@ def _append_summary_csv(csv_path: Path, result: BenchmarkResult) -> None:
         writer.writerow(asdict(result))
 
 
-def _load_cg_reference_total(cg_ref_json: Path) -> float:
+def _load_py_cg_reference_total(cg_ref_json: Path) -> float:
     if not cg_ref_json.is_file():
         return 0.0
     data = json.loads(cg_ref_json.read_text())
@@ -407,14 +552,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--mode",
-        choices=["cg", "fresean", "c", "all"],
+        choices=[*MODES, *MODE_ALIASES.keys()],
         default="all",
         help="benchmark phase to run",
     )
     parser.add_argument(
         "--case",
         default="",
-        help=f"py case: {', '.join(BENCH_CASES)} (required for fresean mode)",
+        help=f"py case: {', '.join(BENCH_CASES)} (required for py_fresean mode)",
     )
     parser.add_argument(
         "--ncpus",
@@ -437,13 +582,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--skip-c-inputs-check",
         action="store_true",
-        help="do not run prepare_c_covar_inputs.sh if inputs missing",
+        help="do not build c_ref inputs if missing",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="regenerate CG reference outputs even if cache/inputs exist",
     )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    mode = normalize_mode(args.mode)
+    if mode not in MODES:
+        print(f"unknown mode {args.mode!r}", file=sys.stderr)
+        return 2
     if args.ncpus < 1:
         print("ncpus must be >= 1", file=sys.stderr)
         return 2
@@ -469,38 +623,52 @@ def main(argv: list[str] | None = None) -> int:
         print("n_jobs, n_workers, and omp_threads must be >= 1", file=sys.stderr)
         return 2
 
-    if args.mode == "fresean" and not case:
-        print("--case is required for --mode fresean", file=sys.stderr)
+    if mode == "py_fresean" and not case:
+        print("--case is required for --mode py_fresean", file=sys.stderr)
         return 2
 
-    if args.mode in {"c", "all"} and not args.skip_c_inputs_check:
-        _ensure_c_inputs(args.c_inputs_dir)
+    if mode in {"c_spectral", "all"} and not args.skip_c_inputs_check:
+        _ensure_c_inputs(args.c_inputs_dir, args.n_frames, force=args.force)
 
     if args.output_dir is None:
-        if args.mode == "cg":
+        if mode == "py_cg":
             args.output_dir = args.cg_reference_dir
-        elif args.mode == "c":
+        elif mode == "c_cg":
+            args.output_dir = args.c_inputs_dir
+        elif mode == "c_spectral":
             args.output_dir = DEFAULT_C_SPECTRAL
-        elif args.mode == "fresean":
+        elif mode == "py_fresean":
             args.output_dir = DEFAULT_PY_CASES / case
         else:
             args.output_dir = DEFAULT_RESULTS / "legacy_all"
 
     bench_t_py_coarse = 0.0
     bench_t_py_fresean = 0.0
+    bench_t_c_coarse = 0.0
     bench_t_c_covar = 0.0
     bench_t_c_eigen = 0.0
     py_coarse_phases: dict[str, float] | None = None
     py_fresean_phases: dict[str, float] | None = None
+    c_coarse_phases: dict[str, float] | None = None
 
-    if args.mode == "cg":
-        print(f"[py CG reference] n_frames={args.n_frames}")
-        py_coarse_phases, cache_dir = run_cg_reference(args.n_frames, args.output_dir)
+    if mode == "py_cg":
+        print(f"[py CG] n_frames={args.n_frames}")
+        py_coarse_phases, cache_dir = run_py_cg_reference(args.n_frames, args.output_dir)
         bench_t_py_coarse = float(py_coarse_phases[BENCH_T_TOTAL])
         print(f"  bench_t_total: {bench_t_py_coarse:.2f} s")
         print(f"  cache: {cache_dir}")
 
-    elif args.mode == "fresean":
+    elif mode == "c_cg":
+        print(f"[C CG] n_frames={args.n_frames}")
+        bench_t_c_coarse, c_coarse_phases = run_c_cg_reference(
+            args.n_frames,
+            args.output_dir,
+            force=args.force,
+        )
+        print(f"  bench_t_coarse: {bench_t_c_coarse:.2f} s")
+        print(f"  outputs: {args.output_dir}")
+
+    elif mode == "py_fresean":
         print(
             f"[py FRESEAN] case={case} ncpus={args.ncpus} "
             f"OMP={omp_threads} n_workers={n_workers} n_jobs={n_jobs}"
@@ -508,20 +676,20 @@ def main(argv: list[str] | None = None) -> int:
         if not args.cg_cache_dir.is_dir():
             print(f"CG cache missing: {args.cg_cache_dir}", file=sys.stderr)
             return 2
-        bench_t_py_fresean, py_fresean_phases, _ = run_fresean_only(
+        bench_t_py_fresean, py_fresean_phases, _ = run_py_fresean_only(
             args.cg_cache_dir,
             n_jobs=n_jobs,
             n_workers=n_workers,
             omp_threads=omp_threads,
         )
-        bench_t_py_coarse = _load_cg_reference_total(
+        bench_t_py_coarse = _load_py_cg_reference_total(
             args.cg_reference_dir / "result.json"
         )
         print(f"  fresean: {bench_t_py_fresean:.2f} s")
 
-    elif args.mode == "c":
+    elif mode == "c_spectral":
         print(f"[C spectral] ncpus={args.ncpus} OMP_NUM_THREADS={args.ncpus}")
-        bench_t_c_covar, bench_t_c_eigen = run_c_benchmark(
+        bench_t_c_covar, bench_t_c_eigen = run_c_spectral(
             args.ncpus, args.c_inputs_dir, args.n_frames
         )
         print(f"  covar: {bench_t_c_covar:.2f} s")
@@ -542,15 +710,15 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(f"  coarse: {bench_t_py_coarse:.2f} s")
         print(f"  fresean: {bench_t_py_fresean:.2f} s")
-        print(f"[C] ncpus={args.ncpus}")
-        bench_t_c_covar, bench_t_c_eigen = run_c_benchmark(
+        print(f"[C spectral] ncpus={args.ncpus}")
+        bench_t_c_covar, bench_t_c_eigen = run_c_spectral(
             args.ncpus, args.c_inputs_dir, args.n_frames
         )
         print(f"  covar: {bench_t_c_covar:.2f} s")
         print(f"  eigen: {bench_t_c_eigen:.2f} s")
 
     result = BenchmarkResult(
-        mode=args.mode,
+        mode=mode,
         case=case,
         ncpus=args.ncpus,
         omp_threads=omp_threads,
@@ -562,17 +730,19 @@ def main(argv: list[str] | None = None) -> int:
         bench_t_py_coarse=bench_t_py_coarse,
         bench_t_py_fresean=bench_t_py_fresean,
         bench_t_py_total=bench_t_py_coarse + bench_t_py_fresean,
+        bench_t_c_coarse=bench_t_c_coarse,
         bench_t_c_covar=bench_t_c_covar,
         bench_t_c_eigen=bench_t_c_eigen,
         bench_t_c_total=bench_t_c_covar + bench_t_c_eigen,
         py_coarse=py_coarse_phases,
         py_fresean=py_fresean_phases,
+        c_coarse=c_coarse_phases,
         n_frames=args.n_frames,
         n_corr=N_CORR,
         dt_ps=DT_PS,
     )
 
-    if args.mode == "cg":
+    if mode in CG_MODES:
         run_dir = args.output_dir
     else:
         run_dir = args.output_dir / f"ncpus_{args.ncpus}"

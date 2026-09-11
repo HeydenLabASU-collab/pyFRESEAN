@@ -6,60 +6,57 @@ Wall-clock FRESEAN spectral analysis on HEWL (303 K, 5000 frames) vs FRESEAN COA
 
 ```
 bench/hewl/
-├── benchmark.py              # run one benchmark job (modes: cg, fresean, c, all)
-├── collect_results.py        # summarize + plot results
-├── prepare_c_covar_inputs.sh # one-time C CG inputs → cg_reference/c_ref/
-├── submit.sh                 # submit SLURM sweeps (cg, c, py phases)
-├── cg_reference/             # shared CG artifacts (outside results/, gitignored)
-│   ├── c_ref/                # C fresean inputs: topol-cg.mtop, ref-cg.gro, traj-cg.trr
-│   └── pyfresean/            # py CG cache + result.json (bench_t_py_coarse)
-└── results/
-    ├── c_spectral/           # C covar+eigen per ncpus
-    ├── py_cases/             # py FRESEAN per case × ncpus
-    │   ├── omp1_njobs_n_nworkers_1/
-    │   ├── omp1_njobs_n_nworkers_2/
-    │   ├── omp1_njobs_n_nworkers_n/
-    │   └── omp_n_njobs_1/
-    └── plots/                # from collect_results.py --plot
+├── benchmark.py       # py_cg, c_cg, py_fresean, c_spectral, all
+├── collect_results.py
+├── submit.sh
+├── cg_reference/      # one-time CG (gitignored except README)
+│   ├── c_ref/
+│   └── pyfresean/
+└── results/           # spectral sweeps (gitignored except README)
+    ├── c_spectral/
+    ├── py_cases/
+    └── plots/
 ```
+
+## Modes
+
+| Mode | What | Output |
+|------|------|--------|
+| `py_cg` | py coarse-grain once | `cg_reference/pyfresean/` |
+| `c_cg` | C `fresean coarse` once | `cg_reference/c_ref/` |
+| `py_fresean` | py spectral sweep | `results/py_cases/{case}/` |
+| `c_spectral` | C covar+eigen sweep | `results/c_spectral/` |
+
+Plots compare `py_fresean` vs `c_spectral` only (CG excluded from both sides).
 
 ## Prerequisites
 
 - HEWL data: `pyfresean/tests/data/fresean_c_ref/hewl_solution_303K/`
-- `FRESEAN_BIN`, `EIGEN_BIN` on PATH; `module load gsl`
+- `FRESEAN_BIN`, `EIGEN_BIN` on PATH; `module load gsl gromacs`
 - `pip install -e .` from pyfresean root
 
-## One-time CG reference
+## Run
 
-C inputs:
-
-```bash
-bash bench/hewl/prepare_c_covar_inputs.sh
-```
-
-pyfresean CG cache + timing:
+One-time CG (or use `submit.sh all`):
 
 ```bash
-python bench/hewl/benchmark.py --mode cg --ncpus 1
+python bench/hewl/benchmark.py --mode py_cg --ncpus 1
+python bench/hewl/benchmark.py --mode c_cg --ncpus 1
 ```
 
-## Submit sweeps
+Full sweep:
 
 ```bash
-bash bench/hewl/submit.sh cg    # py CG reference only
-bash bench/hewl/submit.sh c     # C spectral sweep
-bash bench/hewl/submit.sh py    # py FRESEAN cases (depends on CG job)
-bash bench/hewl/submit.sh all   # all phases
+bash bench/hewl/submit.sh all
 ```
 
-## Plot
+Plot:
 
 ```bash
 python bench/hewl/collect_results.py --case all --plot
-python bench/hewl/collect_results.py --case omp1_njobs_n_nworkers_1 --plot
 ```
 
-## Cases
+## `py_fresean` cases
 
 | Case | OMP | n_jobs | n_workers |
 |------|-----|--------|-----------|

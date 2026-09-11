@@ -1,15 +1,23 @@
 #!/usr/bin/env bash
-# Submit full HEWL benchmark sweep (CG once, C spectral, py FRESEAN cases).
+# Submit full HEWL benchmark sweep.
 #
 # Usage:
-#   bash bench/hewl/submit.sh           # submit everything
-#   bash bench/hewl/submit.sh cg        # py CG reference only
-#   bash bench/hewl/submit.sh c         # C spectral sweep only
-#   bash bench/hewl/submit.sh py        # py FRESEAN case sweeps only
+#   bash bench/hewl/submit.sh                  # all phases
+#   bash bench/hewl/submit.sh py_cg            # py CG once
+#   bash bench/hewl/submit.sh c_cg             # C CG once
+#   bash bench/hewl/submit.sh py_fresean       # py FRESEAN case sweeps
+#   bash bench/hewl/submit.sh c_spectral       # C spectral sweep
 #
+# Legacy phase names: cg → py_cg, py → py_fresean, c → c_spectral
 set -euo pipefail
 
 PHASE="${1:-all}"
+case "${PHASE}" in
+  cg) PHASE="py_cg" ;;
+  py) PHASE="py_fresean" ;;
+  c) PHASE="c_spectral" ;;
+esac
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PYFRESEAN_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 RESULTS="${SCRIPT_DIR}/results"
@@ -51,29 +59,36 @@ _submit() {
     --wrap="${cmd}"
 }
 
-_submit_cg() {
+_submit_py_cg() {
   local out="${SCRIPT_DIR}/cg_reference/pyfresean"
-  _submit "hewl-cg-ref" 1 "${out}" \
-    "$(_bench --mode cg --ncpus 1 --output-dir bench/hewl/cg_reference/pyfresean)" 1
+  _submit "hewl-py-cg" 1 "${out}" \
+    "$(_bench --mode py_cg --ncpus 1 --output-dir bench/hewl/cg_reference/pyfresean)" 1
 }
 
-_submit_c() {
+_submit_c_cg() {
+  local out="${SCRIPT_DIR}/cg_reference/c_ref"
+  _submit "hewl-c-cg" 1 "${out}" \
+    "$(_bench --mode c_cg --ncpus 1 --output-dir bench/hewl/cg_reference/c_ref)" 1
+}
+
+_submit_c_spectral() {
+  local dep="${1:-}"
   local out="${RESULTS}/c_spectral"
   for n in "${CPUS[@]}"; do
-    _submit "hewl-c-${n}" "${n}" "${out}" \
-        "$(_bench --mode c --ncpus ${n} --skip-c-inputs-check --c-inputs-dir bench/hewl/cg_reference/c_ref --output-dir bench/hewl/results/c_spectral)" \
-      "${n}"
+    _submit "hewl-c-spectral-${n}" "${n}" "${out}" \
+      "$(_bench --mode c_spectral --ncpus ${n} --skip-c-inputs-check --c-inputs-dir bench/hewl/cg_reference/c_ref --output-dir bench/hewl/results/c_spectral)" \
+      "${n}" "${dep}"
     sleep "${STAGGER_SEC}"
   done
 }
 
-_submit_py_cases() {
+_submit_py_fresean() {
   local dep="${1:-}"
   for case in "${CASES[@]}"; do
     local out="${RESULTS}/py_cases/${case}"
     for n in "${CPUS[@]}"; do
       _submit "hewl-py-${case}-${n}" "${n}" "${out}" \
-        "$(_bench --mode fresean --case ${case} --ncpus ${n} --skip-c-inputs-check --cg-cache-dir bench/hewl/cg_reference/pyfresean --cg-reference-dir bench/hewl/cg_reference/pyfresean --output-dir bench/hewl/results/py_cases/${case})" \
+        "$(_bench --mode py_fresean --case ${case} --ncpus ${n} --skip-c-inputs-check --cg-cache-dir bench/hewl/cg_reference/pyfresean --cg-reference-dir bench/hewl/cg_reference/pyfresean --output-dir bench/hewl/results/py_cases/${case})" \
         "${n}" "${dep}"
       sleep "${STAGGER_SEC}"
     done
@@ -82,18 +97,22 @@ _submit_py_cases() {
 
 case "${PHASE}" in
   all)
-    CG_JOB="$(_submit_cg | awk '{print $4}')"
-    echo "CG reference job: ${CG_JOB}"
+    PY_CG_JOB="$(_submit_py_cg | awk '{print $4}')"
+    C_CG_JOB="$(_submit_c_cg | awk '{print $4}')"
+    echo "py CG job: ${PY_CG_JOB}"
+    echo "C CG job: ${C_CG_JOB}"
     sleep "${STAGGER_SEC}"
-    _submit_c
+    _submit_c_spectral "${C_CG_JOB}"
     sleep "${STAGGER_SEC}"
-    _submit_py_cases "${CG_JOB}"
+    _submit_py_fresean "${PY_CG_JOB}"
     ;;
-  cg) _submit_cg ;;
-  c) _submit_c ;;
-  py) _submit_py_cases ;;
+  py_cg) _submit_py_cg ;;
+  c_cg) _submit_c_cg ;;
+  c_spectral) _submit_c_spectral ;;
+  py_fresean) _submit_py_fresean ;;
   *)
-    echo "usage: submit.sh [all|cg|c|py]" >&2
+    echo "usage: submit.sh [all|py_cg|c_cg|py_fresean|c_spectral]" >&2
+    echo "       legacy: cg, py, c" >&2
     exit 2
     ;;
 esac

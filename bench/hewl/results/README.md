@@ -1,21 +1,15 @@
 # HEWL benchmark results
 
-Timed sweeps only. Shared CG inputs live in `bench/hewl/cg_reference/`.
+Spectral sweep outputs only. One-time CG lives in `../cg_reference/`.
 
 ```
 results/
-├── c_spectral/            # C covar+eigen per ncpus
-├── py_cases/              # py FRESEAN per case × ncpus
-│   ├── omp1_njobs_n_nworkers_1/
-│   ├── omp1_njobs_n_nworkers_2/
-│   ├── omp1_njobs_n_nworkers_n/
-│   └── omp_n_njobs_1/
-└── plots/                 # from collect_results.py --plot
+├── c_spectral/     # --mode c_spectral
+├── py_cases/       # --mode py_fresean
+└── plots/          # collect_results.py --plot
 ```
 
-CG reference timings and cache: `../cg_reference/pyfresean/result.json`
-
-## Collect / plot
+CG timings: `../cg_reference/pyfresean/result.json`, `../cg_reference/c_ref/result.json`
 
 ```bash
 python bench/hewl/collect_results.py --case all --plot

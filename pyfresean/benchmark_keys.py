@@ -34,6 +34,7 @@ FRESEAN_BENCHMARK_KEYS = (
 BENCH_T_PY_COARSE = "bench_t_py_coarse"
 BENCH_T_PY_FRESEAN = "bench_t_py_fresean"
 BENCH_T_PY_TOTAL = "bench_t_py_total"
+BENCH_T_C_COARSE = "bench_t_c_coarse"
 BENCH_T_C_COVAR = "bench_t_c_covar"
 BENCH_T_C_EIGEN = "bench_t_c_eigen"
 BENCH_T_C_TOTAL = "bench_t_c_total"
