@@ -58,12 +58,18 @@ def load_c_evec_mmat(path: Path | str, n_corr: int | None = None) -> np.ndarray:
         for freq_index in range(n_freq):
             magic_block = struct.unpack("i", handle.read(4))[0]
             if magic_block != block_bytes:
-                raise ValueError(f"block size mismatch at frequency {freq_index}")
+                raise ValueError(
+                    f"block size mismatch at frequency {freq_index}"
+                )
             raw = struct.unpack(f"{n1 * n1}d", handle.read(block_bytes))
-            vectors[freq_index] = np.asarray(raw, dtype=np.float64).reshape(n1, n1)
+            vectors[freq_index] = np.asarray(raw, dtype=np.float64).reshape(
+                n1, n1
+            )
             magic_block_end = struct.unpack("i", handle.read(4))[0]
             if magic_block_end != block_bytes:
-                raise ValueError(f"block footer mismatch at frequency {freq_index}")
+                raise ValueError(
+                    f"block footer mismatch at frequency {freq_index}"
+                )
     return vectors
 
 

@@ -15,10 +15,9 @@
 # In case the project was not installed
 import os
 import sys
+
 sys.path.insert(0, os.path.abspath("../.."))
 import pyfresean  # noqa
-
-
 
 # -- Project information -----------------------------------------------------
 
@@ -60,9 +59,7 @@ autosummary_generate = True
 # This skips generating an autodoc of the test module
 # when using the autosummary directive that is included
 # by default in api.rst
-autodoc_mock_imports = [
-    'pyfresean.tests'
-]
+autodoc_mock_imports = ["pyfresean.tests"]
 napoleon_google_docstring = False
 napoleon_use_param = False
 napoleon_use_ivar = True
@@ -107,9 +104,7 @@ html_theme = "mdanalysis_sphinx_theme"
 # documentation.
 #
 html_theme_options = {
-
     "mda_official": False,
-
 }
 
 # Set your logo and favicon here -- replace the placeholders!
@@ -145,15 +140,12 @@ latex_elements = {
     # The paper size ("letterpaper" or "a4paper").
     #
     # "papersize": "letterpaper",
-
     # The font size ("10pt", "11pt" or "12pt").
     #
     # "pointsize": "10pt",
-
     # Additional stuff for the LaTeX preamble.
     #
     # "preamble": "",
-
     # Latex figure (float) alignment
     #
     # "figure_align": "htbp",
@@ -163,8 +155,13 @@ latex_elements = {
 # (source start file, target name, title,
 #  author, documentclass [howto, manual, or own class]).
 latex_documents = [
-    (master_doc, "pyfresean.tex", "PyFRESEAN Documentation",
-     "pyfresean", "manual"),
+    (
+        master_doc,
+        "pyfresean.tex",
+        "PyFRESEAN Documentation",
+        "pyfresean",
+        "manual",
+    ),
 ]
 
 
@@ -172,10 +169,7 @@ latex_documents = [
 
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
-man_pages = [
-    (master_doc, "pyfresean", "PyFRESEAN Documentation",
-     [author], 1)
-]
+man_pages = [(master_doc, "pyfresean", "PyFRESEAN Documentation", [author], 1)]
 
 
 # -- Options for Texinfo output ----------------------------------------------
@@ -184,9 +178,15 @@ man_pages = [
 # (source start file, target name, title, author,
 #  dir menu entry, description, category)
 texinfo_documents = [
-    (master_doc, "pyfresean", "PyFRESEAN Documentation",
-     author, "pyfresean", "A Python package for FRESEAN based analysis",
-     "Miscellaneous"),
+    (
+        master_doc,
+        "pyfresean",
+        "PyFRESEAN Documentation",
+        author,
+        "pyfresean",
+        "A Python package for FRESEAN based analysis",
+        "Miscellaneous",
+    ),
 ]
 
 

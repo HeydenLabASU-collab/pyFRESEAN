@@ -7,7 +7,11 @@ A Python package for FRESEAN based analysis
 from importlib.metadata import version
 
 from pyfresean.analysis import FRESEAN
-from pyfresean.coarsegrain import CoarseGrain, CoarseGrainMap, SUPPORTED_CG_METHODS
+from pyfresean.coarsegrain import (
+    CoarseGrain,
+    CoarseGrainMap,
+    SUPPORTED_CG_METHODS,
+)
 from pyfresean.transformations import Align, Unwrap
 
 __all__ = [

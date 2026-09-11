@@ -113,18 +113,24 @@ def normalize_mode(mode: str) -> str:
 
 
 def _tmp_root() -> Path:
-    root = Path(os.environ.get("SLURM_TMPDIR", os.environ.get("TMPDIR", "/tmp")))
+    root = Path(
+        os.environ.get("SLURM_TMPDIR", os.environ.get("TMPDIR", "/tmp"))
+    )
     root.mkdir(parents=True, exist_ok=True)
     return root
 
 
 def resolve_case(case: str, ncpus: int) -> tuple[int, int, int]:
     if case not in BENCH_CASES:
-        raise ValueError(f"unknown case {case!r}; choose: {', '.join(BENCH_CASES)}")
+        raise ValueError(
+            f"unknown case {case!r}; choose: {', '.join(BENCH_CASES)}"
+        )
     return BENCH_CASES[case](ncpus)
 
 
-def resolve_parallel_config(config: str, ncpus: int) -> tuple[str, int, int, int]:
+def resolve_parallel_config(
+    config: str, ncpus: int
+) -> tuple[str, int, int, int]:
     """Legacy alias mapping for older submit scripts."""
     aliases = {
         "a": "omp1_njobs_n_nworkers_1",
@@ -167,7 +173,9 @@ def run_c_cg_reference(
         if result_json.is_file():
             data = json.loads(result_json.read_text())
             phases = data.get("c_coarse") or {}
-            total = float(data.get(BENCH_T_C_COARSE, phases.get(BENCH_T_TOTAL, 0.0)))
+            total = float(
+                data.get(BENCH_T_C_COARSE, phases.get(BENCH_T_TOTAL, 0.0))
+            )
             return total, phases
         return 0.0, {}
 
@@ -226,8 +234,7 @@ def run_c_cg_reference(
     phases["bench_t_trjconv"] = time.perf_counter() - t_trjconv
 
     coarse_inp = work / "coarse.inp"
-    coarse_inp.write_text(
-        f"""#fnTop
+    coarse_inp.write_text(f"""#fnTop
 topol-aa.mtop
 #fnCrd
 aa.trr
@@ -244,8 +251,7 @@ static.job
 tmptraj.gro
 #fnOutTopol
 topol-cg.mtop
-"""
-    )
+""")
 
     t_coarse = time.perf_counter()
     subprocess.run(
@@ -279,7 +285,9 @@ topol-cg.mtop
     return phases[BENCH_T_TOTAL], phases
 
 
-def _ensure_c_inputs(c_inputs_dir: Path, n_frames: int, force: bool = False) -> None:
+def _ensure_c_inputs(
+    c_inputs_dir: Path, n_frames: int, force: bool = False
+) -> None:
     if not force and _c_cg_inputs_ready(c_inputs_dir):
         return
     run_c_cg_reference(n_frames, c_inputs_dir, force=force)
@@ -287,8 +295,7 @@ def _ensure_c_inputs(c_inputs_dir: Path, n_frames: int, force: bool = False) -> 
 
 def _write_covar_inp(workdir: Path, n_frames: int, n_corr: int) -> Path:
     inp = workdir / "covar.inp"
-    inp.write_text(
-        f"""#fnTop
+    inp.write_text(f"""#fnTop
 topol-cg.mtop
 #fnCrd
 traj-cg.trr
@@ -320,8 +327,7 @@ ref-cg.gro
 100
 #fnOut
 cg
-"""
-    )
+""")
     return inp
 
 
@@ -337,7 +343,9 @@ def _localize_aa_trajectory(paths) -> tuple[Path, Path]:
     return local_tpr, local_trj
 
 
-def _write_cg_cache(cg: CoarseGrain, u_cg: mda.Universe, cache_dir: Path) -> None:
+def _write_cg_cache(
+    cg: CoarseGrain, u_cg: mda.Universe, cache_dir: Path
+) -> None:
     if cache_dir.exists():
         shutil.rmtree(cache_dir)
     cache_dir.mkdir(parents=True)
@@ -359,7 +367,11 @@ def _load_cg_universe(cache_dir: Path) -> tuple[CoarseGrain, mda.Universe]:
     top_path = cache_dir / "topol-cg.top"
     traj_path = cache_dir / "traj-cg.trr"
     map_path = cache_dir / "cg_map.npz"
-    if not top_path.is_file() or not traj_path.is_file() or not map_path.is_file():
+    if (
+        not top_path.is_file()
+        or not traj_path.is_file()
+        or not map_path.is_file()
+    ):
         raise FileNotFoundError(f"CG cache incomplete under {cache_dir}")
     u_cg = mda.Universe(str(top_path), str(traj_path), topology_format="ITP")
     cg = CoarseGrain.from_cg_map(u_cg.atoms, map_path)
@@ -367,7 +379,9 @@ def _load_cg_universe(cache_dir: Path) -> tuple[CoarseGrain, mda.Universe]:
     return cg, u_cg
 
 
-def run_py_cg_reference(n_frames: int, output_dir: Path) -> tuple[dict[str, float], Path]:
+def run_py_cg_reference(
+    n_frames: int, output_dir: Path
+) -> tuple[dict[str, float], Path]:
     _set_py_thread_env(1)
     paths = resolve_hewl_solution_303K_paths()
     local_tpr, local_trj = _localize_aa_trajectory(paths)
@@ -473,7 +487,12 @@ def run_py_benchmark(
         py_fresean_phases = analysis.run(verbose=False, benchmark=True)
     bench_t_py_fresean = float(py_fresean_phases[BENCH_T_SPECTRAL])
     _ = analysis.results.freqs.shape
-    return bench_t_py_coarse, bench_t_py_fresean, py_coarse_phases, py_fresean_phases
+    return (
+        bench_t_py_coarse,
+        bench_t_py_fresean,
+        py_coarse_phases,
+        py_fresean_phases,
+    )
 
 
 def _prepare_c_workdir(c_inputs_dir: Path, workdir: Path) -> None:
@@ -564,7 +583,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--ncpus",
         type=int,
-        default=int(os.environ.get("NCPUS", os.environ.get("SLURM_CPUS_PER_TASK", "1"))),
+        default=int(
+            os.environ.get("NCPUS", os.environ.get("SLURM_CPUS_PER_TASK", "1"))
+        ),
     )
     parser.add_argument(
         "--parallel-config",
@@ -577,7 +598,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--n-frames", type=int, default=N_FRAMES_DEFAULT)
     parser.add_argument("--c-inputs-dir", type=Path, default=DEFAULT_C_INPUTS)
     parser.add_argument("--cg-cache-dir", type=Path, default=DEFAULT_CG_CACHE)
-    parser.add_argument("--cg-reference-dir", type=Path, default=DEFAULT_CG_REFERENCE)
+    parser.add_argument(
+        "--cg-reference-dir", type=Path, default=DEFAULT_CG_REFERENCE
+    )
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument(
         "--skip-c-inputs-check",
@@ -620,7 +643,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.omp_threads is not None:
         omp_threads = args.omp_threads
     if n_jobs < 1 or n_workers < 1 or omp_threads < 1:
-        print("n_jobs, n_workers, and omp_threads must be >= 1", file=sys.stderr)
+        print(
+            "n_jobs, n_workers, and omp_threads must be >= 1", file=sys.stderr
+        )
         return 2
 
     if mode == "py_fresean" and not case:
@@ -653,7 +678,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if mode == "py_cg":
         print(f"[py CG] n_frames={args.n_frames}")
-        py_coarse_phases, cache_dir = run_py_cg_reference(args.n_frames, args.output_dir)
+        py_coarse_phases, cache_dir = run_py_cg_reference(
+            args.n_frames, args.output_dir
+        )
         bench_t_py_coarse = float(py_coarse_phases[BENCH_T_TOTAL])
         print(f"  bench_t_total: {bench_t_py_coarse:.2f} s")
         print(f"  cache: {cache_dir}")
@@ -700,13 +727,16 @@ def main(argv: list[str] | None = None) -> int:
             f"[pyfresean all] ncpus={args.ncpus} "
             f"OMP={omp_threads} n_workers={n_workers} n_jobs={n_jobs}"
         )
-        bench_t_py_coarse, bench_t_py_fresean, py_coarse_phases, py_fresean_phases = (
-            run_py_benchmark(
-                n_jobs=n_jobs,
-                n_workers=n_workers,
-                n_frames=args.n_frames,
-                omp_threads=omp_threads,
-            )
+        (
+            bench_t_py_coarse,
+            bench_t_py_fresean,
+            py_coarse_phases,
+            py_fresean_phases,
+        ) = run_py_benchmark(
+            n_jobs=n_jobs,
+            n_workers=n_workers,
+            n_frames=args.n_frames,
+            omp_threads=omp_threads,
         )
         print(f"  coarse: {bench_t_py_coarse:.2f} s")
         print(f"  fresean: {bench_t_py_fresean:.2f} s")

@@ -19,16 +19,21 @@ def _c_eigenvalues_vdos_normalized(
     n_dof: int,
 ) -> np.ndarray:
     avg_temp = (
-        np.sum(c_eval[0])
-        + 2 * np.sum(c_eval[1:])
-    ) / (2 * n_corr - 1) / win_time_0 / (8.3145 * 0.1) / n_dof
+        (np.sum(c_eval[0]) + 2 * np.sum(c_eval[1:]))
+        / (2 * n_corr - 1)
+        / win_time_0
+        / (8.3145 * 0.1)
+        / n_dof
+    )
     vdos_norm = n_corr * win_time_0 * (8.3145 * 0.1 * avg_temp)
     if vdos_norm <= 0:
         return c_eval
     return c_eval / vdos_norm
 
 
-def load_c_eigenvalues_vdos_normalized(analysis: FRESEAN, eval_dat: Path | str) -> np.ndarray:
+def load_c_eigenvalues_vdos_normalized(
+    analysis: FRESEAN, eval_dat: Path | str
+) -> np.ndarray:
     """C eigenvalues with the same VDOS normalization as pyfresean results."""
     return _c_eigenvalues_vdos_normalized(
         load_c_eigenvalues_dat(eval_dat),
@@ -146,7 +151,9 @@ def plot_eigenvalues_vs_c_separate_images(
             ax = axs[row, 0]
             n_plot = min(n_modes, values.shape[1])
             mode_numbers = np.arange(1, n_plot + 1)
-            ax.plot(mode_numbers, values[freq_index, :n_plot], "o-", markersize=4)
+            ax.plot(
+                mode_numbers, values[freq_index, :n_plot], "o-", markersize=4
+            )
             ax.set_ylabel(f"λ @ {freqs[freq_index]:.2f} cm$^{-1}$")
             ax.set_title(label, fontsize=9)
         axs[-1, 0].set_xlabel("eigenvalue number (mode index)")

@@ -2,7 +2,11 @@ import numpy as np
 import pytest
 import MDAnalysis as mda
 
-from pyfresean.coarsegrain import CoarseGrain, CENTERED_MODES, SUPPORTED_CG_METHODS
+from pyfresean.coarsegrain import (
+    CoarseGrain,
+    CENTERED_MODES,
+    SUPPORTED_CG_METHODS,
+)
 from pyfresean.exceptions import MissingBeadMassWarning, TopologyFormatWarning
 
 
@@ -58,7 +62,9 @@ def test_resolve_universe_accepts_universe_path_and_tuple(tmp_path):
             writer.write(u.atoms)
 
     assert CoarseGrain._resolve_universe(u) is u
-    assert CoarseGrain._resolve_universe(str(top)).atoms.n_atoms == u.atoms.n_atoms
+    assert (
+        CoarseGrain._resolve_universe(str(top)).atoms.n_atoms == u.atoms.n_atoms
+    )
     assert len(CoarseGrain._resolve_universe((top, traj)).trajectory) == 2
 
 
@@ -121,7 +127,9 @@ def test_aa_universe_from_cg_files(tmp_path):
     cg = CoarseGrain.from_atomgroup(u.atoms)
     cg_top = tmp_path / "cg.pdb"
     cg_traj = tmp_path / "cg.trr"
-    u_cg = cg.build_universe(output_cg_topology=str(cg_top), output_cg_trajectory=str(cg_traj))
+    u_cg = cg.build_universe(
+        output_cg_topology=str(cg_top), output_cg_trajectory=str(cg_traj)
+    )
 
     u_aa = CoarseGrain.aa_universe_from_cg(
         mapping=cg,
@@ -242,7 +250,9 @@ def test_cg_universe_writes_map_and_rotations(tmp_path):
     for frame in range(2):
         u.trajectory[frame]
         u_aa.trajectory[frame]
-        np.testing.assert_allclose(u_aa.atoms.positions, u.atoms.positions, atol=1e-4)
+        np.testing.assert_allclose(
+            u_aa.atoms.positions, u.atoms.positions, atol=1e-4
+        )
 
 
 def test_reconstruct_aa_universe_from_file_paths(tmp_path):
@@ -265,7 +275,9 @@ def test_reconstruct_aa_universe_from_file_paths(tmp_path):
     )
     u.trajectory[0]
     u_aa.trajectory[0]
-    np.testing.assert_allclose(u_aa.atoms.positions, u.atoms.positions, atol=1e-3)
+    np.testing.assert_allclose(
+        u_aa.atoms.positions, u.atoms.positions, atol=1e-3
+    )
 
 
 def test_track_backmap_from_top_trr_matches_source(tmp_path):
@@ -288,7 +300,9 @@ def test_track_backmap_from_top_trr_matches_source(tmp_path):
     for frame in range(len(u.trajectory)):
         u.trajectory[frame]
         u_aa.trajectory[frame]
-        np.testing.assert_allclose(u_aa.atoms.positions, u.atoms.positions, atol=1e-3)
+        np.testing.assert_allclose(
+            u_aa.atoms.positions, u.atoms.positions, atol=1e-3
+        )
 
 
 def test_aa_universe_from_cg_with_atomgroup_and_map(tmp_path):
@@ -312,7 +326,9 @@ def test_aa_universe_from_cg_with_atomgroup_and_map(tmp_path):
     )
     u.trajectory[0]
     u_aa.trajectory[0]
-    np.testing.assert_allclose(u_aa.atoms.positions, u.atoms.positions, atol=1e-3)
+    np.testing.assert_allclose(
+        u_aa.atoms.positions, u.atoms.positions, atol=1e-3
+    )
 
 
 def test_aa_universe_from_cg_with_cg_and_u_cg(tmp_path):
@@ -329,7 +345,9 @@ def test_aa_universe_from_cg_with_cg_and_u_cg(tmp_path):
     )
     u.trajectory[0]
     u_aa.trajectory[0]
-    np.testing.assert_allclose(u_aa.atoms.positions, u.atoms.positions, atol=1e-4)
+    np.testing.assert_allclose(
+        u_aa.atoms.positions, u.atoms.positions, atol=1e-4
+    )
 
 
 def test_track_mode_writes_rotation_file_not_instance(tmp_path):
@@ -366,7 +384,9 @@ def test_aa_universe_from_cg_with_saved_rotations(tmp_path):
     )
     u.trajectory[0]
     u_aa.trajectory[0]
-    np.testing.assert_allclose(u_aa.atoms.positions, u.atoms.positions, atol=1e-3)
+    np.testing.assert_allclose(
+        u_aa.atoms.positions, u.atoms.positions, atol=1e-3
+    )
 
 
 def test_from_atomgroup_builds_mapping_eagerly():
@@ -387,7 +407,9 @@ def test_build_canonical_mapping_bead_counts():
 
 def test_backmap_positions_exact_with_tracked_centered():
     u = _make_protein_universe(n_frames=3)
-    u.atoms.positions = np.arange(u.atoms.n_atoms * 3, dtype=np.float32).reshape(-1, 3)
+    u.atoms.positions = np.arange(
+        u.atoms.n_atoms * 3, dtype=np.float32
+    ).reshape(-1, 3)
     for frame in range(3):
         u.trajectory[frame]
         u.atoms.positions += frame * 0.17
@@ -395,7 +417,9 @@ def test_backmap_positions_exact_with_tracked_centered():
     for frame in range(3):
         u.trajectory[frame]
         centered = cg.compute_centered_coords(u.atoms.positions)
-        rebuilt = cg.backmap_positions(cg.map_positions(u.atoms.positions), centered)
+        rebuilt = cg.backmap_positions(
+            cg.map_positions(u.atoms.positions), centered
+        )
         np.testing.assert_allclose(rebuilt, u.atoms.positions, atol=1e-5)
 
 
@@ -409,12 +433,16 @@ def test_backmap_positions_uses_reference_when_centered_omitted():
 
 def test_map_positions_matches_hand_com():
     u = _make_protein_universe()
-    u.atoms.positions = np.arange(u.atoms.n_atoms * 3, dtype=np.float32).reshape(-1, 3)
+    u.atoms.positions = np.arange(
+        u.atoms.n_atoms * 3, dtype=np.float32
+    ).reshape(-1, 3)
     cg = CoarseGrain.from_atomgroup(u.atoms)
     bead_pos = cg.map_positions(u.atoms.positions)
 
     back_atoms = u.atoms[[0, 1, 2, 3]]
-    expected_back = np.average(back_atoms.positions, axis=0, weights=back_atoms.masses)
+    expected_back = np.average(
+        back_atoms.positions, axis=0, weights=back_atoms.masses
+    )
     np.testing.assert_allclose(bead_pos[0], expected_back)
 
 
@@ -444,7 +472,9 @@ def test_scale_plumed_directions_formula():
 
 def test_write_plumed_mode_input(tmp_path):
     u = _make_protein_universe()
-    u.atoms.positions = np.arange(u.atoms.n_atoms * 3, dtype=np.float32).reshape(-1, 3)
+    u.atoms.positions = np.arange(
+        u.atoms.n_atoms * 3, dtype=np.float32
+    ).reshape(-1, 3)
     cg = CoarseGrain.from_atomgroup(u.atoms)
     mode_a = np.ones((u.atoms.n_atoms, 3), dtype=np.float64)
     mode_b = 2.0 * mode_a
@@ -478,12 +508,17 @@ def test_backmap_mass_weighted_formula():
     u = _make_protein_universe()
     cg = CoarseGrain.from_atomgroup(u.atoms)
     masses = u.atoms.masses.astype(np.float64)
-    cg_vectors = np.arange(cg.mapping.n_beads * 3, dtype=np.float64).reshape(-1, 3)
+    cg_vectors = np.arange(cg.mapping.n_beads * 3, dtype=np.float64).reshape(
+        -1, 3
+    )
     aa_vectors = cg.backmap_modes(cg_vectors)
 
     for bead_idx, indices in enumerate(cg.mapping.atom_indices):
         bead_mass = cg.mapping.bead_masses[bead_idx]
-        expected = cg_vectors[bead_idx] * np.sqrt(masses[indices] / bead_mass)[:, np.newaxis]
+        expected = (
+            cg_vectors[bead_idx]
+            * np.sqrt(masses[indices] / bead_mass)[:, np.newaxis]
+        )
         np.testing.assert_allclose(aa_vectors[indices], expected)
 
         physical = aa_vectors[indices] / np.sqrt(masses[indices])[:, np.newaxis]
@@ -572,7 +607,9 @@ def test_cg_universe_writes_standard_files(tmp_path):
     top_path = tmp_path / "cg.pdb"
     traj_path = tmp_path / "cg.trr"
 
-    u_cg = cg.build_universe(output_cg_topology=str(top_path), output_cg_trajectory=str(traj_path))
+    u_cg = cg.build_universe(
+        output_cg_topology=str(top_path), output_cg_trajectory=str(traj_path)
+    )
 
     assert top_path.is_file()
     assert traj_path.is_file()
@@ -591,7 +628,9 @@ def test_cg_universe_writes_standard_files(tmp_path):
     top_path = tmp_path / "cg.pdb"
     traj_path = tmp_path / "cg.trr"
 
-    u_cg = cg.build_universe(output_cg_topology=str(top_path), output_cg_trajectory=str(traj_path))
+    u_cg = cg.build_universe(
+        output_cg_topology=str(top_path), output_cg_trajectory=str(traj_path)
+    )
 
     assert top_path.is_file()
     assert traj_path.is_file()
@@ -673,13 +712,17 @@ def test_cg_universe_file_backed_without_memory_reader(tmp_path):
 
     u.trajectory[0]
     expected = cg.map_positions(u.atoms.positions)
-    np.testing.assert_allclose(u_cg.trajectory[0].positions, expected, rtol=1e-4)
+    np.testing.assert_allclose(
+        u_cg.trajectory[0].positions, expected, rtol=1e-4
+    )
 
 
 def test_cg_universe_in_memory_false_requires_output_paths():
     u = _make_protein_universe(n_frames=2)
     cg = CoarseGrain.from_atomgroup(u.atoms)
-    with pytest.raises(ValueError, match="output_cg_trajectory and output_cg_topology"):
+    with pytest.raises(
+        ValueError, match="output_cg_trajectory and output_cg_topology"
+    ):
         cg.build_universe(in_memory=False)
 
 

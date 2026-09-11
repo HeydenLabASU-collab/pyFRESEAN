@@ -14,7 +14,9 @@ def interpolate_spectrum(
 ) -> tuple[np.ndarray, np.ndarray]:
     frequencies = np.asarray(frequencies, dtype=float)
     intensities = np.asarray(intensities, dtype=float)
-    x_hi = np.linspace(frequencies[0], frequencies[-1], interpol_step * len(frequencies))
+    x_hi = np.linspace(
+        frequencies[0], frequencies[-1], interpol_step * len(frequencies)
+    )
     y_hi = CubicSpline(frequencies, intensities)(x_hi)
     return x_hi, y_hi
 
@@ -66,11 +68,20 @@ def plot_spectra(
         label_list = list(labels)
 
     for idx, y in enumerate(series):
-        x_hi, y_hi = interpolate_spectrum(frequencies, y, interpol_step=interpol_step)
+        x_hi, y_hi = interpolate_spectrum(
+            frequencies, y, interpol_step=interpol_step
+        )
         label = label_list[idx] if idx < len(label_list) else None
         color = color_list[idx] if idx < len(color_list) else "black"
         linestyle = style_list[idx] if idx < len(style_list) else "-"
-        ax.plot(x_hi, y_hi, color=color, linestyle=linestyle, label=label, **line_kwargs)
+        ax.plot(
+            x_hi,
+            y_hi,
+            color=color,
+            linestyle=linestyle,
+            label=label,
+            **line_kwargs,
+        )
         if show_markers:
             ax.plot(frequencies, y, "o", color=color, markersize=2)
 

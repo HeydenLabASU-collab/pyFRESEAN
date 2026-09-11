@@ -12,7 +12,11 @@ def _project_root() -> Path:
 
 def fresean_pytutorial_ref_root() -> Path:
     """Root directory for stored Python tutorial FRESEAN reference outputs."""
-    return Path(__file__).resolve().parent.parent / "data" / "fresean_pytutorial_ref"
+    return (
+        Path(__file__).resolve().parent.parent
+        / "data"
+        / "fresean_pytutorial_ref"
+    )
 
 
 def ala_dipeptide_gas_50K_reference_npz() -> Path:

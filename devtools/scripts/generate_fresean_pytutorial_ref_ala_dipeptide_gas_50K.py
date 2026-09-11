@@ -57,7 +57,11 @@ def run_fresean_gas_50k(data_dir: Path) -> dict:
     sel = u.select_atoms("all")
     u_ref = mda.Universe(str(ref))
     u.trajectory.add_transformations(
-        Align(sel, reference_positions=u_ref.atoms.positions, place_com_in_box=False),
+        Align(
+            sel,
+            reference_positions=u_ref.atoms.positions,
+            place_com_in_box=False,
+        ),
     )
 
     analysis = FRESEAN(

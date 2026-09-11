@@ -5,6 +5,7 @@ FRESEAN --- :mod:`pyfresean.analysis.FRESEAN`
 This module contains the :class:`FRESEAN` class.
 
 """
+
 from __future__ import annotations
 
 import os
@@ -106,7 +107,7 @@ class FRESEAN(AnalysisBase):
     """
 
     # **NOTE**: Add instruction to run parallel
-    # export OMP_NUM_THREADS=4 
+    # export OMP_NUM_THREADS=4
     # taskset -c 0-3 python3 test_fresean.py (=2)
     # python3 test_fresean.py (=2)
 
@@ -229,7 +230,9 @@ class FRESEAN(AnalysisBase):
                 n_frames,
             )
 
-    def _symmetrize_corr_matrix(self, corr_matrix: np.ndarray, n_elements: int) -> None:
+    def _symmetrize_corr_matrix(
+        self, corr_matrix: np.ndarray, n_elements: int
+    ) -> None:
         for i in range(n_elements):
             for j in range(i + 1, n_elements):
                 corr_matrix[:, j, i] = corr_matrix[:, i, j]
@@ -292,7 +295,9 @@ class FRESEAN(AnalysisBase):
         n_elements: int,
     ) -> tuple[np.ndarray, np.ndarray]:
         eigenvalues = np.empty((n_corr, n_elements), dtype=np.float64)
-        eigenvectors = np.empty((n_corr, n_elements, n_elements), dtype=np.float64)
+        eigenvectors = np.empty(
+            (n_corr, n_elements, n_elements), dtype=np.float64
+        )
         max_workers = self._resolve_n_jobs(self.n_jobs)
         if max_workers == 1:
             for freq_index in range(n_corr):
@@ -335,7 +340,9 @@ class FRESEAN(AnalysisBase):
         win_time = np.real(ifft(win_freq))
         n_elements = self._n_elements
         self.results = Results(
-            velocities=np.zeros((n_elements, self.n_frames), dtype=np.complex128),
+            velocities=np.zeros(
+                (n_elements, self.n_frames), dtype=np.complex128
+            ),
             corr_matrix=np.empty((self.n_corr, n_elements, n_elements)),
             freqs=freqs,
             win_time=win_time,
@@ -398,9 +405,12 @@ class FRESEAN(AnalysisBase):
         )
 
         avg_temp = (
-            np.sum(eigenvalues[0])
-            + 2 * np.sum(eigenvalues[1:])
-        ) / (2 * n_corr - 1) / win_time[0] / (8.3145 * 0.1) / self._n_dof
+            (np.sum(eigenvalues[0]) + 2 * np.sum(eigenvalues[1:]))
+            / (2 * n_corr - 1)
+            / win_time[0]
+            / (8.3145 * 0.1)
+            / self._n_dof
+        )
         vdos_norm = n_corr * win_time[0] * (8.3145 * 0.1 * avg_temp)
         if vdos_norm > 0:
             eigenvalues /= vdos_norm
@@ -531,7 +541,9 @@ class FRESEAN(AnalysisBase):
         results_aggregator = self._get_aggregator()
         self.results = results_aggregator.merge(remote_results)
 
-        timings: dict[str, float] = {BENCH_T_VELOCITY_MATRIX: bench_t_velocity_matrix}
+        timings: dict[str, float] = {
+            BENCH_T_VELOCITY_MATRIX: bench_t_velocity_matrix
+        }
         self._conclude(timings=timings)
         self.benchmark = finalize_fresean_benchmark(timings)
         return self.benchmark

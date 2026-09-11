@@ -264,9 +264,7 @@ def plot_cg_reference(plot_path: Path) -> None:
 
 def print_table(case: str, rows: list[dict], c_rows: list[dict]) -> None:
     print(f"\n=== {CASE_LABELS.get(case, case)} ===")
-    print(
-        f"{'ncpus':>5}  {'bench_t_py_fresean':>18}  {'bench_t_c_total':>16}"
-    )
+    print(f"{'ncpus':>5}  {'bench_t_py_fresean':>18}  {'bench_t_c_total':>16}")
     c_map = {int(r["ncpus"]): r for r in c_rows}
     for r in rows:
         n = int(r["ncpus"])

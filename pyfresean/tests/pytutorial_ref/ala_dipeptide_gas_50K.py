@@ -6,7 +6,10 @@ import os
 import urllib.request
 from pathlib import Path
 
-from pyfresean.tests.pytutorial_ref.paths import _project_root, ala_dipeptide_gas_50K_reference_npz
+from pyfresean.tests.pytutorial_ref.paths import (
+    _project_root,
+    ala_dipeptide_gas_50K_reference_npz,
+)
 
 REFERENCE_NPZ = ala_dipeptide_gas_50K_reference_npz()
 
@@ -26,12 +29,18 @@ def tutorial_data_root() -> Path:
     if env:
         return Path(env).expanduser().resolve()
     nested = _project_root() / "examples" / "input_data"
-    if nested.is_dir() and (nested / "harmonic-normal-modes" / "min.xyz").exists():
+    if (
+        nested.is_dir()
+        and (nested / "harmonic-normal-modes" / "min.xyz").exists()
+    ):
         return nested
     legacy = _project_root().parent / "data"
     if legacy.is_dir():
         return legacy
-    cache = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "pyfresean-test-data"
+    cache = (
+        Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
+        / "pyfresean-test-data"
+    )
     return cache
 
 
@@ -50,8 +59,19 @@ def ensure_gas_50k_data(data_root: Path | None = None) -> Path:
     ref = root / "harmonic-normal-modes" / "min.xyz"
 
     if not ref.exists():
-        nested_ref = _project_root() / "examples" / "input_data" / "harmonic-normal-modes" / "min.xyz"
-        legacy_ref = _project_root().parent / "data" / "harmonic-normal-modes" / "min.xyz"
+        nested_ref = (
+            _project_root()
+            / "examples"
+            / "input_data"
+            / "harmonic-normal-modes"
+            / "min.xyz"
+        )
+        legacy_ref = (
+            _project_root().parent
+            / "data"
+            / "harmonic-normal-modes"
+            / "min.xyz"
+        )
         if nested_ref.exists():
             root = nested_ref.parents[1]
             ref = nested_ref
