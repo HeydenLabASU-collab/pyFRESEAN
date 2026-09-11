@@ -16,7 +16,9 @@ def peak_indices(vdos: np.ndarray) -> np.ndarray:
 def vdos_peaks(vdos: np.ndarray, extra: tuple[int, ...] = ()) -> np.ndarray:
     peaks = peak_indices(vdos)
     if extra:
-        peaks = np.sort(np.unique(np.concatenate([np.asarray(extra, dtype=int), peaks])))
+        peaks = np.sort(
+            np.unique(np.concatenate([np.asarray(extra, dtype=int), peaks]))
+        )
     return peaks
 
 
@@ -32,7 +34,10 @@ def low_frequency_peaks(
 
 def mode_spectrum(corr_matrix: np.ndarray, mode: np.ndarray) -> np.ndarray:
     return np.array(
-        [np.dot(mode, np.dot(corr_matrix[i], mode)) for i in range(corr_matrix.shape[0])]
+        [
+            np.dot(mode, np.dot(corr_matrix[i], mode))
+            for i in range(corr_matrix.shape[0])
+        ]
     )
 
 

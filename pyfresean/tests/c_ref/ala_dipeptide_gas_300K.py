@@ -87,7 +87,9 @@ def resolve_ala_dipeptide_gas_300K_paths(
         Path(c_reference_dir).resolve()
         if c_reference_dir is not None
         else Path(
-            os.environ.get("PYFRESEAN_C_REF_DIR", ala_dipeptide_gas_300K_reference_dir())
+            os.environ.get(
+                "PYFRESEAN_C_REF_DIR", ala_dipeptide_gas_300K_reference_dir()
+            )
         ).resolve()
     )
     return AlaDipeptideGas300KPaths(
@@ -125,7 +127,9 @@ def compare_cg_trajectory_to_c_reference(
     """Compare pyfresean CG positions/velocities to C ``traj-cg.trr``."""
     ref = mda.Universe(str(reference_trr))
     if len(ref.trajectory) < len(u_cg.trajectory):
-        raise ValueError("reference trajectory has fewer frames than pyfresean CG")
+        raise ValueError(
+            "reference trajectory has fewer frames than pyfresean CG"
+        )
     n_frames = len(u_cg.trajectory)
     pos_diff = []
     vel_diff = []
@@ -166,7 +170,9 @@ def run_pyfresean_fresean_cg(
     lag_symmetrization: str = "average",
 ) -> FRESEAN:
     if not paths.harmonic_ref.exists():
-        raise FileNotFoundError(f"missing reference structure {paths.harmonic_ref}")
+        raise FileNotFoundError(
+            f"missing reference structure {paths.harmonic_ref}"
+        )
     u_ref = mda.Universe(str(paths.harmonic_ref))
     ref_cg = cg.map_positions(u_ref.atoms.positions)
     u_cg.trajectory.add_transformations(
@@ -193,9 +199,12 @@ def _c_eigenvalues_vdos_normalized(
 ) -> np.ndarray:
     """Apply the same VDOS normalization pyfresean uses after diagonalization."""
     avg_temp = (
-        np.sum(c_eval[0])
-        + 2 * np.sum(c_eval[1:])
-    ) / (2 * n_corr - 1) / win_time_0 / (8.3145 * 0.1) / n_dof
+        (np.sum(c_eval[0]) + 2 * np.sum(c_eval[1:]))
+        / (2 * n_corr - 1)
+        / win_time_0
+        / (8.3145 * 0.1)
+        / n_dof
+    )
     vdos_norm = n_corr * win_time_0 * (8.3145 * 0.1 * avg_temp)
     if vdos_norm <= 0:
         return c_eval
@@ -232,12 +241,16 @@ def compare_fresean_eigenvalues_to_c(
         "n_freq_compared": float(n_compare),
         "n_dof_compared": float(n_dof),
         "max_abs_diff": float(
-            np.max(np.abs(py_eval[:n_compare, :n_dof] - c_eval[:n_compare, :n_dof]))
+            np.max(
+                np.abs(py_eval[:n_compare, :n_dof] - c_eval[:n_compare, :n_dof])
+            )
         ),
     }
 
 
-def load_c_vdos_total_normalized(analysis: FRESEAN, eval_dat: Path) -> np.ndarray:
+def load_c_vdos_total_normalized(
+    analysis: FRESEAN, eval_dat: Path
+) -> np.ndarray:
     """Total VDoS from C eigenvalues with the same normalization as pyfresean."""
     c_eval = _c_eigenvalues_vdos_normalized(
         load_c_eigenvalues_dat(eval_dat),
@@ -266,7 +279,9 @@ def compare_fresean_vdos_total_to_c(
     )
     return {
         "n_freq_compared": float(n_compare),
-        "max_abs_diff": float(np.max(np.abs(py_vdos[:n_compare] - c_vdos[:n_compare]))),
+        "max_abs_diff": float(
+            np.max(np.abs(py_vdos[:n_compare] - c_vdos[:n_compare]))
+        ),
         "py_vdos_sum": float(py_vdos[:n_compare].sum()),
         "c_vdos_sum": float(c_vdos[:n_compare].sum()),
     }

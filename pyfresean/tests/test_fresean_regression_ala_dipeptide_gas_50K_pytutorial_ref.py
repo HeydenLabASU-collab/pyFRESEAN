@@ -8,8 +8,12 @@ import MDAnalysis as mda
 
 from pyfresean import Align, FRESEAN
 from pyfresean.postprocess import low_frequency_peaks
-from pyfresean.tests.pytutorial_ref.ala_dipeptide_gas_50K import ensure_gas_50k_data
-from pyfresean.tests.pytutorial_ref.paths import ala_dipeptide_gas_50K_reference_npz
+from pyfresean.tests.pytutorial_ref.ala_dipeptide_gas_50K import (
+    ensure_gas_50k_data,
+)
+from pyfresean.tests.pytutorial_ref.paths import (
+    ala_dipeptide_gas_50K_reference_npz,
+)
 
 
 @pytest.fixture(scope="module")
@@ -39,7 +43,11 @@ def fresean_gas_50k_analysis(gas_50k_data_root):
     sel = u.select_atoms("all")
     u_ref = mda.Universe(str(ref))
     u.trajectory.add_transformations(
-        Align(sel, reference_positions=u_ref.atoms.positions, place_com_in_box=False),
+        Align(
+            sel,
+            reference_positions=u_ref.atoms.positions,
+            place_com_in_box=False,
+        ),
     )
 
     analysis = FRESEAN(
@@ -59,14 +67,18 @@ def fresean_gas_50k_analysis(gas_50k_data_root):
 class TestFRESEANAlaDipeptideGas50KRegression:
     """Check FRESEAN against stored gas-50K tutorial reference data."""
 
-    def test_run_metadata(self, fresean_gas_50k_analysis, fresean_gas_50k_reference):
+    def test_run_metadata(
+        self, fresean_gas_50k_analysis, fresean_gas_50k_reference
+    ):
         ref = fresean_gas_50k_reference
         analysis = fresean_gas_50k_analysis
         assert analysis.n_frames == int(ref["n_frames"])
         assert analysis.n_corr == int(ref["n_corr"])
         assert analysis.results.n_dof == float(ref["n_dof"])
 
-    def test_inferred_temperature(self, fresean_gas_50k_analysis, fresean_gas_50k_reference):
+    def test_inferred_temperature(
+        self, fresean_gas_50k_analysis, fresean_gas_50k_reference
+    ):
         ref = fresean_gas_50k_reference
         np.testing.assert_allclose(
             fresean_gas_50k_analysis.results.avg_temperature,
@@ -74,7 +86,9 @@ class TestFRESEANAlaDipeptideGas50KRegression:
             rtol=1e-5,
         )
 
-    def test_low_frequency_peaks(self, fresean_gas_50k_analysis, fresean_gas_50k_reference):
+    def test_low_frequency_peaks(
+        self, fresean_gas_50k_analysis, fresean_gas_50k_reference
+    ):
         ref = fresean_gas_50k_reference
         freqs = fresean_gas_50k_analysis.results.freqs
         vdos = fresean_gas_50k_analysis.results.vdos_total
@@ -85,7 +99,9 @@ class TestFRESEANAlaDipeptideGas50KRegression:
             rtol=1e-5,
         )
 
-    def test_total_vdos_curve(self, fresean_gas_50k_analysis, fresean_gas_50k_reference):
+    def test_total_vdos_curve(
+        self, fresean_gas_50k_analysis, fresean_gas_50k_reference
+    ):
         ref = fresean_gas_50k_reference
         vdos = fresean_gas_50k_analysis.results.vdos_total
         np.testing.assert_allclose(
@@ -100,7 +116,9 @@ class TestFRESEANAlaDipeptideGas50KRegression:
             rtol=1e-6,
         )
 
-    def test_frequency_grid(self, fresean_gas_50k_analysis, fresean_gas_50k_reference):
+    def test_frequency_grid(
+        self, fresean_gas_50k_analysis, fresean_gas_50k_reference
+    ):
         np.testing.assert_allclose(
             fresean_gas_50k_analysis.results.freqs,
             fresean_gas_50k_reference["freqs"],

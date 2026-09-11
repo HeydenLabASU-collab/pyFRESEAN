@@ -5,18 +5,31 @@ FRESEAN --- :mod:`pyfresean.analysis.FRESEAN`
 This module contains the :class:`FRESEAN` class.
 
 """
+
 from __future__ import annotations
 
 import os
+import time
+import warnings
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING, Literal, Optional, Union
+from functools import partial
+from typing import TYPE_CHECKING, Any, Literal, Optional, Union
+
+import numpy as np
+from MDAnalysis.analysis.backends import BackendBase, BackendSerial
 
 LagSymmetrization = Literal["mirror", "average"]
 
-import numpy as np
 from MDAnalysis.analysis.base import AnalysisBase, Results
 from MDAnalysis.analysis.results import ResultsGroup
 from scipy.fft import fft, ifft
+
+from pyfresean.benchmark_keys import (
+    BENCH_T_CORR_MATRIX,
+    BENCH_T_EIGEN,
+    BENCH_T_VELOCITY_MATRIX,
+    finalize_fresean_benchmark,
+)
 
 if TYPE_CHECKING:
     from MDAnalysis.core.groups import AtomGroup
@@ -94,7 +107,7 @@ class FRESEAN(AnalysisBase):
     """
 
     # **NOTE**: Add instruction to run parallel
-    # export OMP_NUM_THREADS=4 
+    # export OMP_NUM_THREADS=4
     # taskset -c 0-3 python3 test_fresean.py (=2)
     # python3 test_fresean.py (=2)
 
@@ -157,6 +170,7 @@ class FRESEAN(AnalysisBase):
                 f"got {n_jobs!r}"
             )
         self.n_jobs = n_jobs
+        self.benchmark: Optional[dict[str, float]] = None
 
     @staticmethod
     def _resolve_n_jobs(n_jobs: Optional[int]) -> int:
@@ -216,7 +230,9 @@ class FRESEAN(AnalysisBase):
                 n_frames,
             )
 
-    def _symmetrize_corr_matrix(self, corr_matrix: np.ndarray, n_elements: int) -> None:
+    def _symmetrize_corr_matrix(
+        self, corr_matrix: np.ndarray, n_elements: int
+    ) -> None:
         for i in range(n_elements):
             for j in range(i + 1, n_elements):
                 corr_matrix[:, j, i] = corr_matrix[:, i, j]
@@ -279,7 +295,9 @@ class FRESEAN(AnalysisBase):
         n_elements: int,
     ) -> tuple[np.ndarray, np.ndarray]:
         eigenvalues = np.empty((n_corr, n_elements), dtype=np.float64)
-        eigenvectors = np.empty((n_corr, n_elements, n_elements), dtype=np.float64)
+        eigenvectors = np.empty(
+            (n_corr, n_elements, n_elements), dtype=np.float64
+        )
         max_workers = self._resolve_n_jobs(self.n_jobs)
         if max_workers == 1:
             for freq_index in range(n_corr):
@@ -322,7 +340,9 @@ class FRESEAN(AnalysisBase):
         win_time = np.real(ifft(win_freq))
         n_elements = self._n_elements
         self.results = Results(
-            velocities=np.zeros((n_elements, self.n_frames), dtype=np.complex128),
+            velocities=np.zeros(
+                (n_elements, self.n_frames), dtype=np.complex128
+            ),
             corr_matrix=np.empty((self.n_corr, n_elements, n_elements)),
             freqs=freqs,
             win_time=win_time,
@@ -349,13 +369,16 @@ class FRESEAN(AnalysisBase):
             self._sqrt_masses * velocities.flatten()
         )
 
-    def _conclude(self):
-        """Calculate the final results of the analysis"""
+    def _conclude(self, timings: Optional[dict[str, float]] = None) -> None:
+        """Calculate the final results of the analysis."""
         if not hasattr(self, "_n_elements"):
             self._init_run_metadata()
         n_elements = self._n_elements
         n_frames = self.n_frames
         n_corr = self.n_corr
+
+        if timings is not None:
+            t_corr = time.perf_counter()
 
         velocities = fft(self.results.velocities, axis=1)
         corr_matrix = self.results.corr_matrix
@@ -371,6 +394,10 @@ class FRESEAN(AnalysisBase):
         )
         corr_matrix /= n_frames
 
+        if timings is not None:
+            timings[BENCH_T_CORR_MATRIX] = time.perf_counter() - t_corr
+            t_eigen = time.perf_counter()
+
         eigenvalues, eigenvectors = self._diagonalize_corr_matrix(
             corr_matrix,
             n_corr,
@@ -378,9 +405,12 @@ class FRESEAN(AnalysisBase):
         )
 
         avg_temp = (
-            np.sum(eigenvalues[0])
-            + 2 * np.sum(eigenvalues[1:])
-        ) / (2 * n_corr - 1) / win_time[0] / (8.3145 * 0.1) / self._n_dof
+            (np.sum(eigenvalues[0]) + 2 * np.sum(eigenvalues[1:]))
+            / (2 * n_corr - 1)
+            / win_time[0]
+            / (8.3145 * 0.1)
+            / self._n_dof
+        )
         vdos_norm = n_corr * win_time[0] * (8.3145 * 0.1 * avg_temp)
         if vdos_norm > 0:
             eigenvalues /= vdos_norm
@@ -392,3 +422,128 @@ class FRESEAN(AnalysisBase):
         self.results.vdos_norm = vdos_norm
         self.results.vdos_total = np.sum(eigenvalues, axis=1)
         del self.results.velocities
+
+        if timings is not None:
+            timings[BENCH_T_EIGEN] = time.perf_counter() - t_eigen
+
+    def run(
+        self,
+        start: Optional[int] = None,
+        stop: Optional[int] = None,
+        step: Optional[int] = None,
+        frames: Optional[Any] = None,
+        verbose: Optional[bool] = None,
+        n_workers: Optional[int] = None,
+        n_parts: Optional[int] = None,
+        backend: Optional[Union[str, BackendBase]] = None,
+        *,
+        unsupported_backend: bool = False,
+        progressbar_kwargs: Optional[dict] = None,
+        benchmark: bool = False,
+    ):
+        """Perform the calculation.
+
+        Parameters
+        ----------
+        benchmark : bool, optional
+            If ``True``, record wall times for the major FRESEAN phases and
+            return them as a dict. The same dict is stored on
+            :attr:`FRESEAN.benchmark`.
+
+            Keys:
+
+            * ``bench_t_velocity_matrix`` — trajectory loop collecting
+              mass-weighted velocities (:meth:`_single_frame`).
+            * ``bench_t_corr_matrix`` — velocity FFT and correlation-matrix
+              assembly in :meth:`_conclude`.
+            * ``bench_t_eigen`` — per-frequency diagonalization and VDOS
+              normalization in :meth:`_conclude`.
+            * ``bench_t_spectral`` — sum of the three phases above (excludes
+              MDAnalysis setup/merge overhead).
+
+        Returns
+        -------
+        self or dict
+            ``self`` when ``benchmark=False``; otherwise a timing dict.
+        """
+        if not benchmark:
+            return super().run(
+                start=start,
+                stop=stop,
+                step=step,
+                frames=frames,
+                verbose=verbose,
+                n_workers=n_workers,
+                n_parts=n_parts,
+                backend=backend,
+                unsupported_backend=unsupported_backend,
+                progressbar_kwargs=progressbar_kwargs,
+            )
+
+        backend = "serial" if backend is None else backend
+        progressbar_kwargs = (
+            {} if progressbar_kwargs is None else progressbar_kwargs
+        )
+        if (progressbar_kwargs or verbose) and not (
+            backend == "serial" or isinstance(backend, BackendSerial)
+        ):
+            raise ValueError(
+                "Can not display progressbar with non-serial backend"
+            )
+
+        if n_workers is None:
+            n_workers = (
+                backend.n_workers
+                if isinstance(backend, BackendBase)
+                and hasattr(backend, "n_workers")
+                else 1
+            )
+
+        n_parts = n_workers if n_parts is None else n_parts
+
+        executor = self._configure_backend(
+            backend=backend,
+            n_workers=n_workers,
+            unsupported_backend=unsupported_backend,
+        )
+        if hasattr(executor, "n_workers") and n_parts < executor.n_workers:
+            warnings.warn(
+                (
+                    f"Analysis not making use of all workers: "
+                    f"{executor.n_workers=} is greater than {n_parts=}"
+                )
+            )
+
+        worker_func = partial(
+            self._compute,
+            progressbar_kwargs=progressbar_kwargs,
+            verbose=verbose,
+        )
+        self._setup_frames(
+            trajectory=self._trajectory,
+            start=start,
+            stop=stop,
+            step=step,
+            frames=frames,
+        )
+        computation_groups = self._setup_computation_groups(
+            start=start, stop=stop, step=step, frames=frames, n_parts=n_parts
+        )
+
+        t_velocity = time.perf_counter()
+        remote_objects = executor.apply(worker_func, computation_groups)
+        bench_t_velocity_matrix = time.perf_counter() - t_velocity
+
+        self.frames = np.hstack([obj.frames for obj in remote_objects])
+        self.times = np.hstack([obj.times for obj in remote_objects])
+
+        remote_results = [obj.results for obj in remote_objects]
+        results_aggregator = self._get_aggregator()
+        self.results = results_aggregator.merge(remote_results)
+
+        timings: dict[str, float] = {
+            BENCH_T_VELOCITY_MATRIX: bench_t_velocity_matrix
+        }
+        self._conclude(timings=timings)
+        self.benchmark = finalize_fresean_benchmark(timings)
+        return self.benchmark

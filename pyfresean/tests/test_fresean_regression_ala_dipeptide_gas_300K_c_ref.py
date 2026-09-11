@@ -18,7 +18,10 @@ from pyfresean.tests.c_ref.ala_dipeptide_gas_300K import (
 )
 from pyfresean.tests.c_ref.io import load_c_eigenvalues_dat
 from pyfresean.tests.c_ref.paths import ala_dipeptide_gas_300K_reference_dir
-from pyfresean.tests.c_ref.plotting import plot_eigenvalues_vs_c, plot_vdos_total_vs_c
+from pyfresean.tests.c_ref.plotting import (
+    plot_eigenvalues_vs_c,
+    plot_vdos_total_vs_c,
+)
 
 
 @pytest.fixture(scope="module")
@@ -59,7 +62,9 @@ def c_fresean_reference(ala_gas_300k_paths):
 
 @pytest.fixture(scope="module")
 def pyfresean_cg(ala_gas_300k_paths):
-    cg, u_cg = run_pyfresean_coarse_grain(ala_gas_300k_paths, n_frames=N_FRAMES_DEFAULT)
+    cg, u_cg = run_pyfresean_coarse_grain(
+        ala_gas_300k_paths, n_frames=N_FRAMES_DEFAULT
+    )
     return cg, u_cg
 
 
@@ -73,7 +78,9 @@ def pyfresean_fresean(ala_gas_300k_paths, pyfresean_cg):
 @pytest.mark.slow
 @pytest.mark.c_ref
 class TestAlaDipeptideGas300KCoarseGrainVsC:
-    def test_cg_trajectory_matches_c_reference(self, c_cg_reference, pyfresean_cg):
+    def test_cg_trajectory_matches_c_reference(
+        self, c_cg_reference, pyfresean_cg
+    ):
         paths = c_cg_reference
         _, u_cg = pyfresean_cg
         metrics = compare_cg_trajectory_to_c_reference(u_cg, paths.c_cg_traj)
@@ -116,7 +123,9 @@ class TestAlaDipeptideGas300KFreseanVsC:
         request,
     ):
         if not request.config.getoption("--c-ref-plot"):
-            pytest.skip("pass --c-ref-plot to write eigenvalue comparison plots")
+            pytest.skip(
+                "pass --c-ref-plot to write eigenvalue comparison plots"
+            )
 
         analysis, paths = pyfresean_fresean
         plot_dir_opt = request.config.getoption("--c-ref-plot-dir")

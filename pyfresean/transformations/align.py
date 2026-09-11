@@ -87,7 +87,9 @@ class Align(TransformationBase):
                 u.atoms.rotate(rot)
             u.atoms.translate(ref_com)
         elif self.rotate:
-            u.atoms.positions = np.dot(u.atoms.positions - sel_com, rot.T) + sel_com
+            u.atoms.positions = (
+                np.dot(u.atoms.positions - sel_com, rot.T) + sel_com
+            )
 
         ts = u.trajectory.ts
         if self.rotate_velocities and self.rotate and ts.has_velocities:

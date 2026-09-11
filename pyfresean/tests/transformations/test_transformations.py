@@ -58,7 +58,9 @@ def test_align_superimposes_translated_copy():
 def test_subtract_com_velocity():
     u = make_Universe(extras=("masses",), n_frames=1, velocities=True)
     u.atoms.masses = np.ones(u.atoms.n_atoms)
-    u.atoms.velocities = np.random.default_rng(0).standard_normal((u.atoms.n_atoms, 3))
+    u.atoms.velocities = np.random.default_rng(0).standard_normal(
+        (u.atoms.n_atoms, 3)
+    )
     align = Align(u.atoms, place_com_in_box=False, subtract_com_velocity=True)
     align(u.trajectory[0])
     sel = u.atoms

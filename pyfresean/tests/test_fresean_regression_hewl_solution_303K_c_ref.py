@@ -17,7 +17,10 @@ from pyfresean.tests.c_ref.hewl_solution_303K import (
     run_pyfresean_fresean_cg,
 )
 from pyfresean.tests.c_ref.paths import hewl_solution_303K_reference_dir
-from pyfresean.tests.c_ref.plotting import plot_eigenvalues_vs_c, plot_vdos_total_vs_c
+from pyfresean.tests.c_ref.plotting import (
+    plot_eigenvalues_vs_c,
+    plot_vdos_total_vs_c,
+)
 
 
 @pytest.fixture(scope="module")
@@ -57,7 +60,9 @@ def c_fresean_reference(hewl_303k_paths):
 
 @pytest.fixture(scope="module")
 def pyfresean_cg(hewl_303k_paths):
-    return run_pyfresean_coarse_grain(hewl_303k_paths, n_frames=N_FRAMES_DEFAULT)
+    return run_pyfresean_coarse_grain(
+        hewl_303k_paths, n_frames=N_FRAMES_DEFAULT
+    )
 
 
 @pytest.fixture(scope="module")
@@ -70,7 +75,9 @@ def pyfresean_fresean(hewl_303k_paths, pyfresean_cg):
 @pytest.mark.slow
 @pytest.mark.c_ref
 class TestHewlSolution303KCoarseGrainVsC:
-    def test_cg_trajectory_matches_c_reference(self, c_cg_reference, pyfresean_cg):
+    def test_cg_trajectory_matches_c_reference(
+        self, c_cg_reference, pyfresean_cg
+    ):
         paths = c_cg_reference
         _, u_cg = pyfresean_cg
         metrics = compare_cg_trajectory_to_c_reference(u_cg, paths.c_cg_traj)
@@ -113,7 +120,9 @@ class TestHewlSolution303KFreseanVsC:
         request,
     ):
         if not request.config.getoption("--c-ref-plot"):
-            pytest.skip("pass --c-ref-plot to write eigenvalue comparison plots")
+            pytest.skip(
+                "pass --c-ref-plot to write eigenvalue comparison plots"
+            )
 
         analysis, paths = pyfresean_fresean
         plot_dir_opt = request.config.getoption("--c-ref-plot-dir")

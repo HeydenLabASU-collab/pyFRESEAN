@@ -2,6 +2,12 @@ import pytest
 import numpy as np
 
 from pyfresean.analysis.fresean import FRESEAN
+from pyfresean.benchmark_keys import (
+    BENCH_T_CORR_MATRIX,
+    BENCH_T_EIGEN,
+    BENCH_T_SPECTRAL,
+    BENCH_T_VELOCITY_MATRIX,
+)
 from pyfresean.transformations import Align, Unwrap
 from pyfresean.tests.utils import make_Universe
 
@@ -51,7 +57,11 @@ class TestFRESEAN:
 
         n_elements = universe.atoms.n_atoms * 3
         assert analysis.results.eigenvalues.shape == (4, n_elements)
-        assert analysis.results.eigenvectors.shape == (4, n_elements, n_elements)
+        assert analysis.results.eigenvectors.shape == (
+            4,
+            n_elements,
+            n_elements,
+        )
         assert analysis.results.corr_matrix.shape == (4, n_elements, n_elements)
         assert analysis.results.freqs.shape == (4,)
         assert analysis.results.vdos_total.shape == (4,)
@@ -77,7 +87,9 @@ class TestFRESEAN:
     def test_build_windowed_lags_average(self, universe):
         analysis = FRESEAN(universe, n_corr=4, lag_symmetrization="average")
         tmp_time = np.arange(16, dtype=np.float64)
-        windowed = analysis._build_windowed_lags(tmp_time, n_corr=4, n_frames=16)
+        windowed = analysis._build_windowed_lags(
+            tmp_time, n_corr=4, n_frames=16
+        )
         assert windowed[0] == 0.0
         assert windowed[1] == (1.0 + 15.0) / 2.0
         assert windowed[2] == (2.0 + 14.0) / 2.0
@@ -87,7 +99,9 @@ class TestFRESEAN:
     def test_build_windowed_lags_mirror(self, universe):
         analysis = FRESEAN(universe, n_corr=4, lag_symmetrization="mirror")
         tmp_time = np.arange(16, dtype=np.float64)
-        windowed = analysis._build_windowed_lags(tmp_time, n_corr=4, n_frames=16)
+        windowed = analysis._build_windowed_lags(
+            tmp_time, n_corr=4, n_frames=16
+        )
         assert np.allclose(windowed[:4], tmp_time[:4])
         assert np.allclose(windowed[4:], tmp_time[3:0:-1])
 
@@ -158,6 +172,31 @@ class TestFRESEAN:
     def test_is_parallelizable(self, universe):
         analysis = FRESEAN(universe, n_corr=4)
         assert analysis.parallelizable
+
+    def test_run_benchmark_returns_phase_timings(self, universe):
+        analysis = FRESEAN(universe, n_corr=4)
+        timings = analysis.run(benchmark=True)
+
+        assert set(timings) == {
+            BENCH_T_VELOCITY_MATRIX,
+            BENCH_T_CORR_MATRIX,
+            BENCH_T_EIGEN,
+            BENCH_T_SPECTRAL,
+        }
+        assert analysis.benchmark == timings
+        for key in (
+            BENCH_T_VELOCITY_MATRIX,
+            BENCH_T_CORR_MATRIX,
+            BENCH_T_EIGEN,
+            BENCH_T_SPECTRAL,
+        ):
+            assert timings[key] >= 0.0
+        assert timings[BENCH_T_SPECTRAL] == pytest.approx(
+            timings[BENCH_T_VELOCITY_MATRIX]
+            + timings[BENCH_T_CORR_MATRIX]
+            + timings[BENCH_T_EIGEN]
+        )
+        assert np.all(np.isfinite(analysis.results.vdos_total))
 
     def test_multiprocessing_run_matches_serial(self, universe):
         serial = FRESEAN(universe, n_corr=4, n_jobs=1)

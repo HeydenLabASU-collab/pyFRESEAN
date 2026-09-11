@@ -81,7 +81,9 @@ def resolve_hewl_solution_303K_paths(
         Path(data_dir).resolve()
         if data_dir is not None
         else Path(
-            os.environ.get("PYFRESEAN_HEWL_DATA_DIR", hewl_solution_303K_reference_dir())
+            os.environ.get(
+                "PYFRESEAN_HEWL_DATA_DIR", hewl_solution_303K_reference_dir()
+            )
         ).resolve()
     )
     c_dir = (

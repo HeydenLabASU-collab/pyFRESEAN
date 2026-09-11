@@ -60,7 +60,10 @@ def main() -> None:
     )
     data_dir = args.data_dir or project_root / "examples" / "input_data"
 
-    env = {**dict(__import__("os").environ), "PYFRESEAN_C_REF_DIR": str(output_dir)}
+    env = {
+        **dict(__import__("os").environ),
+        "PYFRESEAN_C_REF_DIR": str(output_dir),
+    }
     if args.data_dir is not None:
         env["PYFRESEAN_TEST_DATA"] = str(data_dir.resolve())
 
