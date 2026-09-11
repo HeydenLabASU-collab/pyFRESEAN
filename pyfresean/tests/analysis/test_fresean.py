@@ -2,6 +2,12 @@ import pytest
 import numpy as np
 
 from pyfresean.analysis.fresean import FRESEAN
+from pyfresean.benchmark_keys import (
+    BENCH_T_CORR_MATRIX,
+    BENCH_T_EIGEN,
+    BENCH_T_SPECTRAL,
+    BENCH_T_VELOCITY_MATRIX,
+)
 from pyfresean.transformations import Align, Unwrap
 from pyfresean.tests.utils import make_Universe
 
@@ -158,6 +164,31 @@ class TestFRESEAN:
     def test_is_parallelizable(self, universe):
         analysis = FRESEAN(universe, n_corr=4)
         assert analysis.parallelizable
+
+    def test_run_benchmark_returns_phase_timings(self, universe):
+        analysis = FRESEAN(universe, n_corr=4)
+        timings = analysis.run(benchmark=True)
+
+        assert set(timings) == {
+            BENCH_T_VELOCITY_MATRIX,
+            BENCH_T_CORR_MATRIX,
+            BENCH_T_EIGEN,
+            BENCH_T_SPECTRAL,
+        }
+        assert analysis.benchmark == timings
+        for key in (
+            BENCH_T_VELOCITY_MATRIX,
+            BENCH_T_CORR_MATRIX,
+            BENCH_T_EIGEN,
+            BENCH_T_SPECTRAL,
+        ):
+            assert timings[key] >= 0.0
+        assert timings[BENCH_T_SPECTRAL] == pytest.approx(
+            timings[BENCH_T_VELOCITY_MATRIX]
+            + timings[BENCH_T_CORR_MATRIX]
+            + timings[BENCH_T_EIGEN]
+        )
+        assert np.all(np.isfinite(analysis.results.vdos_total))
 
     def test_multiprocessing_run_matches_serial(self, universe):
         serial = FRESEAN(universe, n_corr=4, n_jobs=1)

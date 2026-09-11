@@ -150,3 +150,9 @@ pyfresean/tests/data/fresean_c_ref/hewl_solution_303K/mdout.mdp
 pyfresean/tests/data/fresean_c_ref/hewl_solution_303K/index.ndx
 # Large C eigenvector matrix (~400 MB); regenerate via generate_fresean_c_ref_hewl_solution_303K.py
 pyfresean/tests/data/fresean_c_ref/hewl_solution_303K/evec_covar_cg.mmat
+
+# HEWL pyfresean vs C benchmarks (generated artifacts; READMEs tracked)
+bench/hewl/cg_reference/*
+!bench/hewl/cg_reference/README.md
+bench/hewl/results/*
+!bench/hewl/results/README.md

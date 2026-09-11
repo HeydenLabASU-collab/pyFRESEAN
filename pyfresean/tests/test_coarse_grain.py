@@ -519,6 +519,39 @@ def test_cg_universe_from_files(tmp_path):
     np.testing.assert_allclose(u_cg.atoms.masses, cg.mapping.bead_masses)
 
 
+def test_build_universe_benchmark_records_phase_timings():
+    u = _make_protein_universe(n_frames=3)
+    cg, u_cg = CoarseGrain.cg_universe(u, benchmark=True)
+
+    assert len(u_cg.trajectory) == 3
+    from pyfresean.benchmark_keys import (
+        BENCH_T_ASSEMBLE_UNIVERSE,
+        BENCH_T_FRAME_PROCESSING,
+        BENCH_T_MAPPING,
+        BENCH_T_TOTAL,
+        BENCH_T_WRITE_OUTPUTS,
+    )
+
+    timings = cg.benchmark
+    assert set(timings) == {
+        BENCH_T_MAPPING,
+        BENCH_T_FRAME_PROCESSING,
+        BENCH_T_WRITE_OUTPUTS,
+        BENCH_T_ASSEMBLE_UNIVERSE,
+        BENCH_T_TOTAL,
+    }
+    for key in timings:
+        assert timings[key] >= 0.0
+    assert timings[BENCH_T_MAPPING] > 0.0
+    assert timings[BENCH_T_FRAME_PROCESSING] > 0.0
+    assert timings[BENCH_T_TOTAL] == pytest.approx(
+        timings[BENCH_T_MAPPING]
+        + timings[BENCH_T_FRAME_PROCESSING]
+        + timings[BENCH_T_WRITE_OUTPUTS]
+        + timings[BENCH_T_ASSEMBLE_UNIVERSE]
+    )
+
+
 def test_cg_universe_shapes():
     u = _make_protein_universe(n_frames=3)
     cg = CoarseGrain.from_atomgroup(u.atoms)

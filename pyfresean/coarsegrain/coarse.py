@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -9,6 +10,14 @@ import MDAnalysis as mda
 import numpy as np
 from MDAnalysis.coordinates.memory import MemoryReader
 
+from pyfresean.benchmark_keys import (
+    BENCH_T_ASSEMBLE_UNIVERSE,
+    BENCH_T_FRAME_PROCESSING,
+    BENCH_T_MAPPING,
+    BENCH_T_WRITE_OUTPUTS,
+    finalize_cg_benchmark,
+    new_cg_benchmark_timings,
+)
 from pyfresean.exceptions import MissingBeadMassWarning, TopologyFormatWarning
 
 if TYPE_CHECKING:
@@ -114,9 +123,12 @@ class CoarseGrain:
         self._memory_n_frames: int = 0
         self._reference_frame: int = 0
         self._centered_mode: str = "track"
+        self.benchmark: Optional[dict[str, float]] = None
 
-    def _ensure_mapping(self) -> CoarseGrainMap:
+    def _ensure_mapping(self, timings: Optional[dict[str, float]] = None) -> CoarseGrainMap:
         if self._mapping is None:
+            if timings is not None:
+                t_mapping = time.perf_counter()
             trajectory = self.atomgroup.universe.trajectory
             if trajectory is not None:
                 trajectory[self._reference_frame]
@@ -126,6 +138,8 @@ class CoarseGrain:
                 self._method,
             )
             self._mapping.reference_frame = self._reference_frame
+            if timings is not None:
+                timings[BENCH_T_MAPPING] += time.perf_counter() - t_mapping
         return self._mapping
 
     @property
@@ -245,6 +259,7 @@ class CoarseGrain:
         n_constraints: float = 0.0,
         method: str = "backbone-sidechain",
         reference: int = 0,
+        timings: Optional[dict[str, float]] = None,
     ) -> CoarseGrain:
         trajectory = atomgroup.universe.trajectory
         if trajectory is not None:
@@ -256,7 +271,7 @@ class CoarseGrain:
             trajectory[reference]
         cg = cls(atomgroup=atomgroup, n_constraints=n_constraints, method=method)
         cg._reference_frame = reference
-        cg._ensure_mapping()
+        cg._ensure_mapping(timings=timings)
         return cg
 
     @classmethod
@@ -436,6 +451,7 @@ class CoarseGrain:
         centered_mode: str = "track",
         output_aa_rotations: Optional[str] = None,
         output_cg_map: Optional[str] = None,
+        benchmark: bool = False,
     ) -> Tuple[CoarseGrain, mda.Universe]:
         """Build a coarse-grained universe from all-atom input.
 
@@ -470,6 +486,9 @@ class CoarseGrain:
             (``track`` mode) or mode metadata only (``ref``).
         output_cg_map
             If set, write :attr:`CoarseGrain.mapping` to an ``.npz`` file.
+        benchmark
+            If ``True``, record wall times for the major coarse-graining phases
+            on :attr:`CoarseGrain.benchmark`.
 
         Returns
         -------
@@ -484,11 +503,13 @@ class CoarseGrain:
         atomgroup = u_aa.select_atoms(select)
         if len(atomgroup) == 0:
             raise ValueError(f"selection {select!r} matched no atoms")
+        timings = new_cg_benchmark_timings() if benchmark else None
         cg = cls.from_atomgroup(
             atomgroup,
             n_constraints=n_constraints,
             method=method,
             reference=reference,
+            timings=timings,
         )
         cg._centered_mode = cls._normalize_centered_mode(centered_mode)
         if output_cg_topology is not None:
@@ -504,6 +525,8 @@ class CoarseGrain:
             centered_mode=centered_mode,
             output_aa_rotations=output_aa_rotations,
             output_cg_map=output_cg_map,
+            benchmark=benchmark,
+            timings=timings,
         )
         return cg, u_cg
 
@@ -1039,6 +1062,7 @@ class CoarseGrain:
         output_traj: str,
         track_centered: bool = True,
         output_aa_rotations: Optional[str] = None,
+        timings: Optional[dict[str, float]] = None,
     ) -> Tuple[mda.Universe, Optional[np.ndarray]]:
         trajectory = self.atomgroup.universe.trajectory
         ag = self.atomgroup
@@ -1049,6 +1073,8 @@ class CoarseGrain:
 
         with mda.Writer(output_traj, n_atoms=scratch.atoms.n_atoms) as writer:
             for frame_idx, frame in enumerate(frame_list):
+                if timings is not None:
+                    t_process = time.perf_counter()
                 trajectory[frame]
                 bead_pos = self.map_positions(ag.positions)
                 if track_centered:
@@ -1064,6 +1090,9 @@ class CoarseGrain:
                 )
                 dims = trajectory.ts.dimensions
                 box = None if dims is None else np.asarray(dims, dtype=np.float32)
+                if timings is not None:
+                    timings[BENCH_T_FRAME_PROCESSING] += time.perf_counter() - t_process
+                    t_write = time.perf_counter()
                 self._fill_scratch_frame(scratch, bead_pos, bead_vel, box)
                 if frame_idx == 0:
                     if self._uses_top_file(output_top):
@@ -1074,6 +1103,8 @@ class CoarseGrain:
                         self._warn_topology_format(output_top)
                         scratch.atoms.write(output_top)
                 writer.write(scratch.atoms)
+                if timings is not None:
+                    timings[BENCH_T_WRITE_OUTPUTS] += time.perf_counter() - t_write
 
         centered_deltas = None
         centered_velocity_deltas = None
@@ -1084,13 +1115,22 @@ class CoarseGrain:
                     bead_centered_vel_list,
                     dtype=np.float32,
                 )
+        if timings is not None:
+            t_assemble = time.perf_counter()
+        universe = self._load_cg_universe_from_disk(output_top, output_traj)
+        if timings is not None:
+            timings[BENCH_T_ASSEMBLE_UNIVERSE] += time.perf_counter() - t_assemble
         if output_aa_rotations is not None:
+            if timings is not None:
+                t_write = time.perf_counter()
             self.save_centered_deltas(
                 output_aa_rotations,
                 centered_deltas=centered_deltas,
                 centered_velocity_deltas=centered_velocity_deltas,
             )
-        return self._load_cg_universe_from_disk(output_top, output_traj), centered_deltas
+            if timings is not None:
+                timings[BENCH_T_WRITE_OUTPUTS] += time.perf_counter() - t_write
+        return universe, centered_deltas
 
     def _write_cg_outputs(
         self,
@@ -1120,21 +1160,41 @@ class CoarseGrain:
         centered_mode: Optional[str] = None,
         output_aa_rotations: Optional[str] = None,
         output_cg_map: Optional[str] = None,
+        benchmark: bool = False,
+        timings: Optional[dict[str, float]] = None,
     ) -> mda.Universe:
         """Build a CG universe from the source atom group already on this instance.
 
         Prefer :meth:`cg_universe` when starting from all-atom file paths.
+
+        Parameters
+        ----------
+        benchmark
+            If ``True``, record wall times on :attr:`CoarseGrain.benchmark`.
+            Keys: ``bench_t_mapping``, ``bench_t_frame_processing``,
+            ``bench_t_write_outputs``, ``bench_t_assemble_universe``, and
+            ``bench_t_total``.
+        timings
+            Optional timing dict populated when benchmarking. When omitted and
+            ``benchmark=True``, a new dict is created on this instance.
         """
         if centered_mode is not None:
             self._centered_mode = self._normalize_centered_mode(centered_mode)
         track_centered = self._centered_mode == "track"
-        self._ensure_mapping()
+        if benchmark and timings is None:
+            timings = new_cg_benchmark_timings()
+        self._ensure_mapping(timings=timings)
         trajectory = self.atomgroup.universe.trajectory
         ag = self.atomgroup
         frame_list = self._resolve_frame_list(trajectory, start, stop, step, frames)
 
         if not frame_list:
+            if timings is not None:
+                t_write = time.perf_counter()
             self._write_cg_outputs(output_aa_rotations, output_cg_map)
+            if timings is not None:
+                timings[BENCH_T_WRITE_OUTPUTS] += time.perf_counter() - t_write
+                self.benchmark = finalize_cg_benchmark(timings)
             return self.empty_cg_universe(n_frames=0)
 
         if not in_memory:
@@ -1149,12 +1209,18 @@ class CoarseGrain:
                 output_cg_trajectory,
                 track_centered=track_centered,
                 output_aa_rotations=output_aa_rotations,
+                timings=timings,
             )
+            if timings is not None:
+                t_write = time.perf_counter()
             self._write_cg_outputs(
                 output_aa_rotations=None,
                 output_cg_map=output_cg_map,
                 centered_deltas=None,
             )
+            if timings is not None:
+                timings[BENCH_T_WRITE_OUTPUTS] += time.perf_counter() - t_write
+                self.benchmark = finalize_cg_benchmark(timings)
             return universe
 
         positions = []
@@ -1165,6 +1231,8 @@ class CoarseGrain:
         has_velocities = None
 
         for frame in frame_list:
+            if timings is not None:
+                t_process = time.perf_counter()
             trajectory[frame]
             positions.append(self.map_positions(ag.positions))
             if track_centered:
@@ -1182,6 +1250,11 @@ class CoarseGrain:
                 has_velocities = trajectory.ts.has_velocities
             if has_velocities:
                 velocities.append(self.map_velocities(ag.velocities))
+            if timings is not None:
+                timings[BENCH_T_FRAME_PROCESSING] += time.perf_counter() - t_process
+
+        if timings is not None:
+            t_assemble = time.perf_counter()
 
         centered_deltas = None
         centered_velocity_deltas = None
@@ -1201,6 +1274,10 @@ class CoarseGrain:
             if has_velocities:
                 ts.velocities = np.asarray(velocities[frame_idx], dtype=np.float32)
 
+        if timings is not None:
+            timings[BENCH_T_ASSEMBLE_UNIVERSE] += time.perf_counter() - t_assemble
+            t_write = time.perf_counter()
+
         if output_cg_topology is not None:
             self._warn_topology_format(output_cg_topology)
             self.write_topology(u, output_cg_topology)
@@ -1213,6 +1290,9 @@ class CoarseGrain:
             centered_deltas=centered_deltas,
             centered_velocity_deltas=centered_velocity_deltas,
         )
+        if timings is not None:
+            timings[BENCH_T_WRITE_OUTPUTS] += time.perf_counter() - t_write
+            self.benchmark = finalize_cg_benchmark(timings)
         return u
 
     def _create_aa_output_universe(
