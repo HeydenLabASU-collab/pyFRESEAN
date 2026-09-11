@@ -70,10 +70,10 @@ class FRESEAN(AnalysisBase):
         second half. The latter is more appropriate for cross-correlations on
         finite trajectories.
     n_jobs: int or None
-        Number of threads for :meth:`_conclude` work. ``1`` or ``None`` runs
-        serially (default). ``-1`` uses :func:`os.cpu_count`. Used for the
-        velocity cross-correlation loop (parallel over row index ``i``) and
-        for per-frequency :func:`numpy.linalg.eigh` diagonalization.
+        Number of threads for per-frequency :func:`numpy.linalg.eigh`
+        diagonalization in :meth:`_conclude`. ``1`` or ``None`` runs serially
+        (default). ``-1`` uses :func:`os.cpu_count`. The correlation-matrix
+        build is vectorized and does not use ``n_jobs``.
     run(..., n_workers=N, backend="multiprocessing")
         When ``n_workers`` > 1 and a parallel backend is used, MDAnalysis
         splits the trajectory across workers for :meth:`_single_frame`
@@ -187,55 +187,53 @@ class FRESEAN(AnalysisBase):
         n_frames: int,
     ) -> np.ndarray:
         """Pack symmetrized lags into the length ``2 * n_corr - 1`` FFT input."""
-        tmp_windowed = np.zeros(2 * n_corr - 1, dtype=np.float64)
-        if self.lag_symmetrization == "average":
-            tmp_windowed[0] = tmp_time[0]
-            for k in range(1, n_corr):
-                tmp_windowed[k] = (tmp_time[k] + tmp_time[n_frames - k]) / 2.0
-        else:
-            tmp_windowed[:n_corr] = tmp_time[:n_corr]
-        tmp_windowed[n_corr:] = tmp_windowed[n_corr - 1 : 0 : -1]
-        return tmp_windowed
+        return self._window_time_batch(
+            tmp_time,
+            n_corr,
+            n_frames,
+            win_time=None,
+            lag_symmetrization=self.lag_symmetrization,
+        )
 
-    def _corr_spectrum_from_velocities(
-        self,
-        vel_i: np.ndarray,
-        vel_j: np.ndarray,
-        win_time: np.ndarray,
+    @staticmethod
+    def _window_time_batch(
+        tmp_time: np.ndarray,
         n_corr: int,
         n_frames: int,
+        win_time: np.ndarray | None,
+        lag_symmetrization: LagSymmetrization,
     ) -> np.ndarray:
-        tmp_freq = np.real(vel_i * vel_j.conj())
-        tmp_time = np.real(ifft(tmp_freq))
-        tmp_windowed = self._build_windowed_lags(tmp_time, n_corr, n_frames)
-        tmp_windowed *= win_time
-        return np.real(fft(tmp_windowed)[:n_corr])
+        """Window and mirror/average lag blocks for arbitrary leading batch dims."""
+        lag_len = 2 * n_corr - 1
+        windowed = np.zeros(tmp_time.shape[:-1] + (lag_len,), dtype=np.float64)
+        windowed[..., 0] = tmp_time[..., 0]
+        if lag_symmetrization == "average" and n_corr > 1:
+            k = np.arange(1, n_corr)
+            windowed[..., 1:n_corr] = (
+                tmp_time[..., 1:n_corr] + tmp_time[..., n_frames - k]
+            ) / 2.0
+        else:
+            windowed[..., :n_corr] = tmp_time[..., :n_corr]
+        windowed[..., n_corr:] = windowed[..., n_corr - 1 : 0 : -1]
+        if win_time is not None:
+            windowed *= win_time
+        return windowed
 
-    def _fill_corr_matrix_row(
-        self,
-        i: int,
-        velocities: np.ndarray,
-        corr_matrix: np.ndarray,
-        win_time: np.ndarray,
-        n_corr: int,
+    @staticmethod
+    def _corr_matrix_block_size(
+        n_columns: int,
         n_frames: int,
-        n_elements: int,
-    ) -> None:
-        for j in range(i, n_elements):
-            corr_matrix[:, i, j] = self._corr_spectrum_from_velocities(
-                velocities[i],
-                velocities[j],
-                win_time,
-                n_corr,
-                n_frames,
-            )
+        max_working_bytes: int = 512 * 1024 * 1024,
+    ) -> int:
+        """Block length along rows/cols for ``(block, n_columns, n_frames)``."""
+        per_row = max(n_columns * n_frames * 8, 1)
+        return max(1, max_working_bytes // per_row)
 
     def _symmetrize_corr_matrix(
         self, corr_matrix: np.ndarray, n_elements: int
     ) -> None:
-        for i in range(n_elements):
-            for j in range(i + 1, n_elements):
-                corr_matrix[:, j, i] = corr_matrix[:, i, j]
+        i_upper, j_upper = np.triu_indices(n_elements, k=1)
+        corr_matrix[:, j_upper, i_upper] = corr_matrix[:, i_upper, j_upper]
 
     def _build_corr_matrix(
         self,
@@ -246,34 +244,29 @@ class FRESEAN(AnalysisBase):
         n_frames: int,
         n_elements: int,
     ) -> None:
-        max_workers = self._resolve_n_jobs(self.n_jobs)
-        if max_workers == 1:
-            for i in range(n_elements):
-                self._fill_corr_matrix_row(
-                    i,
-                    velocities,
-                    corr_matrix,
-                    win_time,
+        """Build the velocity cross-correlation matrix (vectorized)."""
+        row_batch = self._corr_matrix_block_size(n_elements, n_frames)
+        for i0 in range(0, n_elements, row_batch):
+            i1 = min(i0 + row_batch, n_elements)
+            row_vel = velocities[i0:i1]
+            n_cols_remaining = n_elements - i0
+            col_batch = self._corr_matrix_block_size(n_cols_remaining, n_frames)
+            for j0 in range(i0, n_elements, col_batch):
+                j1 = min(j0 + col_batch, n_elements)
+                col_vel = velocities[j0:j1]
+                cross_freq = np.real(
+                    row_vel[:, None, :] * np.conj(col_vel[None, :, :])
+                )
+                tmp_time = np.real(ifft(cross_freq, axis=-1))
+                windowed = self._window_time_batch(
+                    tmp_time,
                     n_corr,
                     n_frames,
-                    n_elements,
+                    win_time,
+                    self.lag_symmetrization,
                 )
-        else:
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                list(
-                    executor.map(
-                        lambda i: self._fill_corr_matrix_row(
-                            i,
-                            velocities,
-                            corr_matrix,
-                            win_time,
-                            n_corr,
-                            n_frames,
-                            n_elements,
-                        ),
-                        range(n_elements),
-                    )
-                )
+                spectra = np.real(fft(windowed, axis=-1)[..., :n_corr])
+                corr_matrix[:, i0:i1, j0:j1] = np.moveaxis(spectra, -1, 0)
         self._symmetrize_corr_matrix(corr_matrix, n_elements)
 
     def _fill_eigen_at_frequency(
