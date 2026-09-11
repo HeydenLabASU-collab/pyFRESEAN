@@ -22,6 +22,14 @@ The rules for this file:
 - @amruthesht
 
 ### Added
+- ``benchmark=True`` on ``FRESEAN.run`` and ``CoarseGrain.cg_universe`` /
+  ``build_universe`` for wall-time dicts; shared ``bench_t_*`` keys in ``pyfresean.benchmark_keys``. (PR #5)
+- HEWL pyfresean vs FRESEAN COARSE (C) benchmark setup under
+  ``bench/hewl/``: ``benchmark.py`` modes ``py_cg``,
+  ``c_cg``, ``py_fresean``, ``c_spectral``; SLURM ``submit.sh``; and ``collect_results.py`` tables/plots comparing py FRESEAN-only vs C covar+eigen (CG excluded for both). (PR #5)
+- ``cg_reference/{pyfresean,c_ref}/`` layout for one-time CG 
+  and ``results/`` (generated outputs gitignored). (PR #5)
+- Unit tests for FRESEAN and CoarseGrain benchmark timing dicts. (PR #5)
 - ``@pytest.mark.c_ref`` regression tests vs stored FRESEAN COARSE (C) for
   alanine dipeptide (gas, 300 K) and HEWL in solution (303 K): CG
   trajectory, eigenvalues, total VDoS, and eigenvectors; optional
@@ -66,6 +74,8 @@ The rules for this file:
 <!-- Bug fixes -->
 
 ### Changed
+- C CG input generation for HEWL benchmarks consolidated into
+  ``benchmark.py --mode c_cg`` (replaces standalone shell script). (PR #5)
 - ``c_ref`` FRESEAN comparisons use ``lag_symmetrization="average"`` to match
   FRESEAN COARSE; tutorial notebooks keep ``"mirror"``. (PR #4)
 - ``FRESEAN`` default ``n_constraints`` is ``0`` for CG workflows. (PR #1)
@@ -76,4 +86,5 @@ The rules for this file:
 <!-- Soon-to-be removed features -->
 
 ### Removed
-<!-- Removed features -->
+- ``bench/hewl/prepare_c_covar_inputs.sh`` (superseded by ``c_cg`` mode).
+  (PR #5)
