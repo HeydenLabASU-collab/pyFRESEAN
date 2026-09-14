@@ -108,6 +108,8 @@ examples/output_data/*
 # Example trajectory inputs (see examples/input_data/README.md)
 examples/input_data/MD-HEWL-303K/input_data/output/
 examples/input_data/**/output/
+examples/input_data/**/*.trr
+examples/input_data/**/*.tpr
 
 # mypy
 .mypy_cache/
