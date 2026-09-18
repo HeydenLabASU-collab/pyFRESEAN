@@ -75,10 +75,6 @@ class FRESEAN(AnalysisBase):
         negative-lag bin from :func:`scipy.fft.ifft`), then mirror for the
         second half. The latter is more appropriate for cross-correlations on
         finite trajectories.
-    n_jobs: int or None
-        Legacy shorthand for :meth:`_conclude` thread pools on ``corr_matrix``
-        and ``eigen``. ``1`` or ``None`` runs serially (default). ``-1`` uses
-        :func:`os.cpu_count`. Prefer ``parallel`` for per-phase control.
     parallel: dict or None
         Optional per-phase threading for :meth:`_conclude`. Keys are
         ``velocity_fft``, ``corr_matrix``, and ``eigen``. Each value is a dict
@@ -92,7 +88,6 @@ class FRESEAN(AnalysisBase):
                 "eigen": {"n_jobs": 1, "omp_threads": 8},
             }
 
-        Entries in ``parallel`` override ``n_jobs`` for the matching phase.
     run(..., n_workers=N, backend="multiprocessing")
         When ``n_workers`` > 1 and a parallel backend is used, MDAnalysis
         splits the trajectory across workers for :meth:`_single_frame`
@@ -160,7 +155,6 @@ class FRESEAN(AnalysisBase):
         dt: float = 0.004,
         sigma: float = 10.0,
         lag_symmetrization: LagSymmetrization = "mirror",
-        n_jobs: Optional[int] = 1,
         parallel: Optional[Mapping[str, Mapping[str, int]]] = None,
         **kwargs,
     ):
@@ -184,8 +178,7 @@ class FRESEAN(AnalysisBase):
                 f"got {lag_symmetrization!r}"
             )
         self.lag_symmetrization = lag_symmetrization
-        self.n_jobs = n_jobs
-        self._parallel = build_phase_parallelism(parallel, n_jobs=n_jobs)
+        self._parallel = build_phase_parallelism(parallel)
         self.benchmark: Optional[dict[str, float]] = None
 
     def _phase_parallel(self, phase: str) -> PhaseParallelism:

@@ -17,12 +17,23 @@ from pyfresean.parallel import (
 )
 
 
-def test_build_phase_parallelism_legacy_n_jobs():
-    phases = build_phase_parallelism(n_jobs=4)
-    expected = PhaseParallelism(n_jobs=4, omp_threads=1)
-    assert phases["corr_matrix"] == expected
-    assert phases["eigen"] == expected
-    assert phases["velocity_fft"].n_jobs == 1
+def test_build_phase_parallelism_defaults():
+    phases = build_phase_parallelism()
+    assert phases["velocity_fft"] == PhaseParallelism()
+    assert phases["corr_matrix"] == PhaseParallelism()
+    assert phases["eigen"] == PhaseParallelism()
+
+
+def test_build_phase_parallelism_per_phase():
+    phases = build_phase_parallelism(
+        parallel={
+            "corr_matrix": {"n_jobs": 4, "omp_threads": 1},
+            "eigen": {"n_jobs": 1, "omp_threads": 8},
+        }
+    )
+    assert phases["corr_matrix"] == PhaseParallelism(n_jobs=4, omp_threads=1)
+    assert phases["eigen"] == PhaseParallelism(n_jobs=1, omp_threads=8)
+    assert phases["velocity_fft"] == PhaseParallelism()
 
 
 def test_build_phase_parallelism_unknown_phase():

@@ -90,8 +90,6 @@ def _parse_phase_values(
 
 def build_phase_parallelism(
     parallel: Optional[Mapping[str, Mapping[str, int]]] = None,
-    *,
-    n_jobs: Optional[int] = None,
 ) -> dict[str, PhaseParallelism]:
     """Build per-phase settings with defaults of ``n_jobs=1``, ``omp_threads=1``.
 
@@ -100,17 +98,8 @@ def build_phase_parallelism(
     parallel
         Optional dict keyed by phase name (``velocity_fft``, ``corr_matrix``,
         ``eigen``). Each value may contain ``n_jobs`` and/or ``omp_threads``.
-    n_jobs
-        Legacy shorthand: when given, sets ``n_jobs`` on ``corr_matrix`` and
-        ``eigen`` unless overridden in ``parallel``. Ignored for
-        ``velocity_fft``.
     """
     phases = {name: PhaseParallelism() for name in FRESEAN_PHASES}
-
-    if n_jobs is not None:
-        _validate_n_jobs(n_jobs, label="n_jobs")
-        for name in ("corr_matrix", "eigen"):
-            phases[name] = PhaseParallelism(n_jobs=n_jobs, omp_threads=1)
 
     if parallel is not None:
         for phase, values in parallel.items():
