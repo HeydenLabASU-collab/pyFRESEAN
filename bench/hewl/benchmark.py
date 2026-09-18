@@ -7,12 +7,9 @@ Modes (run separately for clean sweeps):
   c_aa        — C all-atom covar inputs once → aa_reference/c_ref/
   py_fresean  — py spectral only (CG cache or all-atom trajectory)
   c_spectral  — C covar+eigen only (reads c_ref inputs)
-  all         — py CG + py FRESEAN + C spectral in one process (legacy)
 
 Use ``--system cg`` (default) or ``--system aa``. Results land under
 ``results/results_{cg,aa}/{py_cases,c_spectral,plots}/``.
-
-Legacy aliases: cg → py_cg, fresean → py_fresean, c → c_spectral.
 """
 
 from __future__ import annotations
@@ -28,8 +25,6 @@ import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable
-
 import MDAnalysis as mda
 
 from pyfresean import Align, FRESEAN
@@ -72,57 +67,54 @@ N_CONSTRAINTS_AA = 6
 CPU_COUNTS = (1, 2, 4, 8, 16, 32, 48)
 SYSTEMS = ("cg", "aa")
 
-MODES = ("py_cg", "c_cg", "c_aa", "py_fresean", "c_spectral", "all")
-MODE_ALIASES = {
-    "cg": "py_cg",
-    "fresean": "py_fresean",
-    "c": "c_spectral",
-}
+MODES = ("py_cg", "c_cg", "c_aa", "py_fresean", "c_spectral")
 
-CaseResolver = Callable[[int], tuple[int, int, int]]
-
-BENCH_CASES: dict[str, CaseResolver] = {
-    "omp1_njobs_n_nworkers_1": lambda n: (1, n, 1),
-    "omp1_njobs_n_nworkers_2": lambda n: (1, n, min(2, n)),
-    "omp1_njobs_n_nworkers_n": lambda n: (1, n, n),
-    "omp_n_njobs_1": lambda n: (n, 1, 1),
-    "omp_n_njobs_1_vec": lambda n: (n, 1, 1),
-    "omp1_njobs_n_vec": lambda n: (1, n, 1),
-    "omp_hybrid_vec": lambda n: (n, n, 1),
-}
-
-_HYBRID_PHASE_CASES = frozenset({"omp1_njobs_n_vec", "omp_hybrid_vec"})
+BENCH_CASES = (
+    "omp_n_njobs_1_vec",
+    "omp1_njobs_n_vec",
+    "omp_hybrid_vec",
+)
 
 
 def fresean_parallel_for_case(
-    omp_threads: int,
-    n_jobs: int,
     case: str,
+    ncpus: int,
 ) -> dict[str, dict[str, int]]:
-    """Map a HEWL benchmark case to a FRESEAN ``parallel`` dict.
+    """Map a HEWL benchmark case to a FRESEAN ``parallel`` dict."""
+    if case not in BENCH_CASES:
+        raise ValueError(
+            f"unknown case {case!r}; choose: {', '.join(BENCH_CASES)}"
+        )
+    n = max(1, int(ncpus))
 
-    ``omp1_njobs_n_vec`` and ``omp_hybrid_vec`` use a tile thread pool for
-    ``corr_matrix`` only (``omp_threads=1`` there) while keeping BLAS threads
-    for ``velocity_fft`` and ``eigen``. ``omp_hybrid_vec`` sets
-    ``omp_threads=N`` on those phases; ``omp1_njobs_n_vec`` leaves them at 1.
-    Other cases apply the same ``omp_threads`` / ``n_jobs`` to ``corr_matrix``
-    and ``eigen``.
-    """
-    omp_threads = max(1, int(omp_threads))
-    n_jobs = max(1, int(n_jobs))
-
-    if case in _HYBRID_PHASE_CASES:
+    if case == "omp_hybrid_vec":
         return {
-            "velocity_fft": {"n_jobs": 1, "omp_threads": omp_threads},
-            "corr_matrix": {"n_jobs": n_jobs, "omp_threads": 1},
-            "eigen": {"n_jobs": 1, "omp_threads": omp_threads},
+            "velocity_fft": {"n_jobs": 1, "omp_threads": n},
+            "corr_matrix": {"n_jobs": n, "omp_threads": 1},
+            "eigen": {"n_jobs": 1, "omp_threads": n},
+        }
+    if case == "omp1_njobs_n_vec":
+        return {
+            "velocity_fft": {"n_jobs": 1, "omp_threads": 1},
+            "corr_matrix": {"n_jobs": n, "omp_threads": 1},
+            "eigen": {"n_jobs": 1, "omp_threads": 1},
         }
 
     return {
-        "velocity_fft": {"n_jobs": 1, "omp_threads": omp_threads},
-        "corr_matrix": {"n_jobs": n_jobs, "omp_threads": omp_threads},
-        "eigen": {"n_jobs": n_jobs, "omp_threads": omp_threads},
+        "velocity_fft": {"n_jobs": 1, "omp_threads": n},
+        "corr_matrix": {"n_jobs": 1, "omp_threads": n},
+        "eigen": {"n_jobs": 1, "omp_threads": n},
     }
+
+
+def bench_case_metadata(
+    case: str, ncpus: int
+) -> tuple[dict[str, dict[str, int]], int, int]:
+    """Return ``(parallel, omp_threads, corr_n_jobs)`` for result logging."""
+    parallel = fresean_parallel_for_case(case, ncpus)
+    omp_threads = int(parallel["eigen"]["omp_threads"])
+    corr_n_jobs = int(parallel["corr_matrix"]["n_jobs"])
+    return parallel, omp_threads, corr_n_jobs
 
 
 CG_MODES = frozenset({"py_cg", "c_cg"})
@@ -179,40 +171,12 @@ class BenchmarkResult:
     dt_ps: float
 
 
-def normalize_mode(mode: str) -> str:
-    return MODE_ALIASES.get(mode, mode)
-
-
 def _tmp_root() -> Path:
     root = Path(
         os.environ.get("SLURM_TMPDIR", os.environ.get("TMPDIR", "/tmp"))
     )
     root.mkdir(parents=True, exist_ok=True)
     return root
-
-
-def resolve_case(case: str, ncpus: int) -> tuple[int, int, int]:
-    if case not in BENCH_CASES:
-        raise ValueError(
-            f"unknown case {case!r}; choose: {', '.join(BENCH_CASES)}"
-        )
-    return BENCH_CASES[case](ncpus)
-
-
-def resolve_parallel_config(
-    config: str, ncpus: int
-) -> tuple[str, int, int, int]:
-    """Legacy alias mapping for older submit scripts."""
-    aliases = {
-        "a": "omp1_njobs_n_nworkers_1",
-        "b": "omp_n_njobs_1",
-        "c": "omp1_njobs_n_nworkers_2",
-        "omp1_njobs_n": "omp1_njobs_n_nworkers_1",
-        "omp_half_njobs_2": "omp1_njobs_n_nworkers_2",
-    }
-    case = aliases.get(config.lower(), config)
-    omp_threads, n_jobs, n_workers = resolve_case(case, ncpus)
-    return case, omp_threads, n_jobs, n_workers
 
 
 def _c_cg_inputs_ready(output_dir: Path) -> bool:
@@ -596,10 +560,8 @@ def run_py_cg_reference(
 
 def run_py_fresean_aa_only(
     n_frames: int,
-    n_jobs: int,
-    n_workers: int,
-    omp_threads: int,
-    case: str = "omp_n_njobs_1",
+    case: str,
+    ncpus: int,
 ) -> tuple[float, dict[str, float]]:
     paths = resolve_hewl_solution_303K_paths()
     local_tpr, local_trj = _localize_aa_trajectory(paths)
@@ -619,18 +581,14 @@ def run_py_fresean_aa_only(
         dt=DT_PS,
         sigma=SIGMA_CM1,
         lag_symmetrization="average",
-        parallel=fresean_parallel_for_case(omp_threads, n_jobs, case),
+        parallel=fresean_parallel_for_case(case, ncpus),
     )
 
-    run_kwargs = {"verbose": False, "benchmark": True, "stop": n_frames}
-    if n_workers > 1:
-        phases = analysis.run(
-            n_workers=n_workers,
-            backend="multiprocessing",
-            **run_kwargs,
-        )
-    else:
-        phases = analysis.run(**run_kwargs)
+    phases = analysis.run(
+        verbose=False,
+        benchmark=True,
+        stop=n_frames,
+    )
     bench_t_py_fresean = float(phases[BENCH_T_SPECTRAL])
     _ = analysis.results.freqs.shape
     return bench_t_py_fresean, phases
@@ -638,10 +596,8 @@ def run_py_fresean_aa_only(
 
 def run_py_fresean_only(
     cg_cache_dir: Path,
-    n_jobs: int,
-    n_workers: int,
-    omp_threads: int,
-    case: str = "omp_n_njobs_1",
+    case: str,
+    ncpus: int,
 ) -> tuple[float, dict[str, float], CoarseGrain]:
     local_cache = _localize_cg_cache(cg_cache_dir)
     cg, u_cg = _load_cg_universe(local_cache)
@@ -660,74 +616,13 @@ def run_py_fresean_only(
         dt=DT_PS,
         sigma=SIGMA_CM1,
         lag_symmetrization="average",
-        parallel=fresean_parallel_for_case(omp_threads, n_jobs, case),
+        parallel=fresean_parallel_for_case(case, ncpus),
     )
 
-    if n_workers > 1:
-        phases = analysis.run(
-            n_workers=n_workers,
-            backend="multiprocessing",
-            verbose=False,
-            benchmark=True,
-        )
-    else:
-        phases = analysis.run(verbose=False, benchmark=True)
+    phases = analysis.run(verbose=False, benchmark=True)
     bench_t_py_fresean = float(phases[BENCH_T_SPECTRAL])
     _ = analysis.results.freqs.shape
     return bench_t_py_fresean, phases, cg
-
-
-def run_py_benchmark(
-    n_jobs: int,
-    n_workers: int,
-    n_frames: int,
-    omp_threads: int = 1,
-    case: str = "omp_n_njobs_1",
-) -> tuple[float, float, dict[str, float], dict[str, float]]:
-    paths = resolve_hewl_solution_303K_paths()
-    local_tpr, local_trj = _localize_aa_trajectory(paths)
-
-    cg, u_cg = CoarseGrain.cg_universe(
-        (local_tpr, local_trj),
-        select="all",
-        stop=n_frames,
-        benchmark=True,
-    )
-    py_coarse_phases = dict(cg.benchmark or {})
-    bench_t_py_coarse = float(py_coarse_phases.get(BENCH_T_TOTAL, 0.0))
-
-    u_cg.trajectory[0]
-    ref_cg = u_cg.atoms.positions.copy()
-    u_cg.trajectory.add_transformations(
-        Align(u_cg.atoms, reference_positions=ref_cg, place_com_in_box=False),
-    )
-    analysis = FRESEAN(
-        u_cg,
-        select="all",
-        n_constraints=cg.mapping.n_constraints,
-        n_corr=N_CORR,
-        dt=DT_PS,
-        sigma=SIGMA_CM1,
-        lag_symmetrization="average",
-        parallel=fresean_parallel_for_case(omp_threads, n_jobs, case),
-    )
-    if n_workers > 1:
-        py_fresean_phases = analysis.run(
-            n_workers=n_workers,
-            backend="multiprocessing",
-            verbose=False,
-            benchmark=True,
-        )
-    else:
-        py_fresean_phases = analysis.run(verbose=False, benchmark=True)
-    bench_t_py_fresean = float(py_fresean_phases[BENCH_T_SPECTRAL])
-    _ = analysis.results.freqs.shape
-    return (
-        bench_t_py_coarse,
-        bench_t_py_fresean,
-        py_coarse_phases,
-        py_fresean_phases,
-    )
 
 
 def _prepare_c_workdir(
@@ -824,8 +719,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--mode",
-        choices=[*MODES, *MODE_ALIASES.keys()],
-        default="all",
+        choices=MODES,
+        required=True,
         help="benchmark phase to run",
     )
     parser.add_argument(
@@ -840,14 +735,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             os.environ.get("NCPUS", os.environ.get("SLURM_CPUS_PER_TASK", "1"))
         ),
     )
-    parser.add_argument(
-        "--parallel-config",
-        default=None,
-        help="legacy alias for --case",
-    )
-    parser.add_argument("--omp-threads", type=int, default=None)
-    parser.add_argument("--n-jobs", type=int, default=None)
-    parser.add_argument("--n-workers", type=int, default=None)
     parser.add_argument("--n-frames", type=int, default=N_FRAMES_DEFAULT)
     parser.add_argument(
         "--system",
@@ -876,36 +763,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    mode = normalize_mode(args.mode)
-    if mode not in MODES:
-        print(f"unknown mode {args.mode!r}", file=sys.stderr)
-        return 2
+    mode = args.mode
     if args.ncpus < 1:
         print("ncpus must be >= 1", file=sys.stderr)
         return 2
 
     case = args.case or ""
-    if args.parallel_config:
-        case, omp_threads, n_jobs, n_workers = resolve_parallel_config(
-            args.parallel_config, args.ncpus
-        )
-    elif case:
-        omp_threads, n_jobs, n_workers = resolve_case(case, args.ncpus)
-    else:
-        omp_threads = args.omp_threads if args.omp_threads is not None else 1
-        n_jobs = args.n_jobs if args.n_jobs is not None else args.ncpus
-        n_workers = args.n_workers if args.n_workers is not None else 1
-    if args.n_jobs is not None:
-        n_jobs = args.n_jobs
-    if args.n_workers is not None:
-        n_workers = args.n_workers
-    if args.omp_threads is not None:
-        omp_threads = args.omp_threads
-    if n_jobs < 1 or n_workers < 1 or omp_threads < 1:
-        print(
-            "n_jobs, n_workers, and omp_threads must be >= 1", file=sys.stderr
-        )
-        return 2
+    omp_threads = 1
+    corr_n_jobs = 1
+    if case:
+        _, omp_threads, corr_n_jobs = bench_case_metadata(case, args.ncpus)
 
     if mode == "py_fresean" and not case:
         print("--case is required for --mode py_fresean", file=sys.stderr)
@@ -923,7 +790,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.c_inputs_dir is None:
         args.c_inputs_dir = default_c_inputs_dir(args.system)
 
-    if mode in {"c_spectral", "all"} and not args.skip_c_inputs_check:
+    if mode == "c_spectral" and not args.skip_c_inputs_check:
         _ensure_c_inputs(
             args.c_inputs_dir,
             args.n_frames,
@@ -942,8 +809,6 @@ def main(argv: list[str] | None = None) -> int:
             args.output_dir = default_c_spectral_dir(args.system)
         elif mode == "py_fresean":
             args.output_dir = default_py_cases_dir(args.system) / case
-        else:
-            args.output_dir = results_root(args.system) / "legacy_all"
 
     bench_t_py_coarse = 0.0
     bench_t_py_fresean = 0.0
@@ -986,15 +851,13 @@ def main(argv: list[str] | None = None) -> int:
     elif mode == "py_fresean":
         print(
             f"[py FRESEAN] system={args.system} case={case} ncpus={args.ncpus} "
-            f"OMP={omp_threads} n_workers={n_workers} n_jobs={n_jobs}"
+            f"OMP={omp_threads} corr_n_jobs={corr_n_jobs}"
         )
         if args.system == "aa":
             bench_t_py_fresean, py_fresean_phases = run_py_fresean_aa_only(
                 args.n_frames,
-                n_jobs=n_jobs,
-                n_workers=n_workers,
-                omp_threads=omp_threads,
                 case=case,
+                ncpus=args.ncpus,
             )
         else:
             if not args.cg_cache_dir.is_dir():
@@ -1002,10 +865,8 @@ def main(argv: list[str] | None = None) -> int:
                 return 2
             bench_t_py_fresean, py_fresean_phases, _ = run_py_fresean_only(
                 args.cg_cache_dir,
-                n_jobs=n_jobs,
-                n_workers=n_workers,
-                omp_threads=omp_threads,
                 case=case,
+                ncpus=args.ncpus,
             )
             bench_t_py_coarse = _load_py_cg_reference_total(
                 args.cg_reference_dir / "result.json"
@@ -1026,43 +887,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  covar: {bench_t_c_covar:.2f} s")
         print(f"  eigen: {bench_t_c_eigen:.2f} s")
 
-    else:  # all
-        print(
-            f"[pyfresean all] ncpus={args.ncpus} "
-            f"OMP={omp_threads} n_workers={n_workers} n_jobs={n_jobs}"
-        )
-        (
-            bench_t_py_coarse,
-            bench_t_py_fresean,
-            py_coarse_phases,
-            py_fresean_phases,
-        ) = run_py_benchmark(
-            n_jobs=n_jobs,
-            n_workers=n_workers,
-            n_frames=args.n_frames,
-            omp_threads=omp_threads,
-            case=case,
-        )
-        print(f"  coarse: {bench_t_py_coarse:.2f} s")
-        print(f"  fresean: {bench_t_py_fresean:.2f} s")
-        print(f"[C spectral] ncpus={args.ncpus}")
-        bench_t_c_covar, bench_t_c_eigen = run_c_spectral(
-            args.ncpus,
-            args.c_inputs_dir,
-            args.n_frames,
-            system=args.system,
-        )
-        print(f"  covar: {bench_t_c_covar:.2f} s")
-        print(f"  eigen: {bench_t_c_eigen:.2f} s")
-
     result = BenchmarkResult(
         mode=mode,
         system=args.system,
         case=case,
         ncpus=args.ncpus,
         omp_threads=omp_threads,
-        py_n_jobs=n_jobs,
-        py_n_workers=n_workers,
+        py_n_jobs=corr_n_jobs,
+        py_n_workers=1,
         hostname=subprocess.check_output(["hostname"], text=True).strip(),
         slurm_job_id=os.environ.get("SLURM_JOB_ID", ""),
         timestamp_utc=datetime.now(timezone.utc).isoformat(),

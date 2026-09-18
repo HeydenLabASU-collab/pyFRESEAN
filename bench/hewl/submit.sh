@@ -8,20 +8,12 @@
 #   bash bench/hewl/submit.sh c_aa             # C AA inputs once
 #   bash bench/hewl/submit.sh py_fresean       # py FRESEAN CG case sweeps
 #   bash bench/hewl/submit.sh py_fresean_vec   # vectorized vec cases only
-#   bash bench/hewl/submit.sh py_fresean_vec_omp1  # OMP=1, n_jobs=N vec test only
-#   bash bench/hewl/submit.sh py_fresean_hybrid   # hybrid: corr n_jobs=N, rfft/eigh OMP=N
+#   bash bench/hewl/submit.sh py_fresean_hybrid   # hybrid case only
 #   bash bench/hewl/submit.sh c_spectral       # C spectral CG sweep
-#   bash bench/hewl/submit.sh aa               # AA py+C spectral (omp_n_njobs_1)
-#
-# Legacy phase names: cg → py_cg, py → py_fresean, c → c_spectral
+#   bash bench/hewl/submit.sh aa               # AA py+C spectral (omp_hybrid_vec)
 set -euo pipefail
 
 PHASE="${1:-all}"
-case "${PHASE}" in
-  cg) PHASE="py_cg" ;;
-  py) PHASE="py_fresean" ;;
-  c) PHASE="c_spectral" ;;
-esac
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PYFRESEAN_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
@@ -30,21 +22,11 @@ RESULTS_AA="${SCRIPT_DIR}/results/results_aa"
 CPUS=(1 2 4 8 16 32 48)
 STAGGER_SEC=20
 CASES=(
-  omp1_njobs_n_nworkers_1
-  omp1_njobs_n_nworkers_2
-  omp1_njobs_n_nworkers_n
-  omp_n_njobs_1
   omp_n_njobs_1_vec
   omp1_njobs_n_vec
+  omp_hybrid_vec
 )
-AA_CASE="omp_n_njobs_1"
-VEC_CASES=(
-  omp_n_njobs_1_vec
-  omp1_njobs_n_vec
-)
-VEC_OMP1_CASES=(
-  omp1_njobs_n_vec
-)
+AA_CASE="omp_hybrid_vec"
 HYBRID_CASES=(
   omp_hybrid_vec
 )
@@ -176,18 +158,14 @@ case "${PHASE}" in
   c_spectral) _submit_c_spectral "" "cg" ;;
   py_fresean) _submit_py_fresean "" "cg" ;;
   py_fresean_vec)
-    _submit_py_fresean_cases "" "cg" "${VEC_CASES[@]}"
-    ;;
-  py_fresean_vec_omp1)
-    _submit_py_fresean_cases "" "cg" "${VEC_OMP1_CASES[@]}"
+    _submit_py_fresean_cases "" "cg" "omp_n_njobs_1_vec" "omp1_njobs_n_vec"
     ;;
   py_fresean_hybrid)
     _submit_py_fresean_cases "" "cg" "${HYBRID_CASES[@]}"
     ;;
   aa) _submit_aa ;;
   *)
-    echo "usage: submit.sh [all|py_cg|c_cg|c_aa|py_fresean|py_fresean_vec|py_fresean_vec_omp1|py_fresean_hybrid|c_spectral|aa]" >&2
-    echo "       legacy: cg, py, c" >&2
+    echo "usage: submit.sh [all|py_cg|c_cg|c_aa|py_fresean|py_fresean_vec|py_fresean_hybrid|c_spectral|aa]" >&2
     exit 2
     ;;
 esac

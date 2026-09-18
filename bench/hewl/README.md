@@ -67,23 +67,20 @@ python bench/hewl/collect_results.py --system aa --case omp_n_njobs_1 --plot
 
 ## `py_fresean` cases
 
-| Case | OMP | n_jobs | n_workers |
-|------|-----|--------|-----------|
-| omp1_njobs_n_nworkers_1 | 1 | N | 1 |
-| omp1_njobs_n_nworkers_2 | 1 | N | min(2, N) |
-| omp1_njobs_n_nworkers_n | 1 | N | N |
-| omp_n_njobs_1 | N | 1 | 1 |
-| omp_n_njobs_1_vec | N | 1 | 1 (vectorized corr tiles) |
-| omp1_njobs_n_vec | 1 | N | 1 (vectorized tiles, thread pool) |
-| omp_n_njobs_1_vec_old | N | 1 | 1 (archived vectorized run) |
+Each case maps to a ``FRESEAN(parallel=...)`` dict via
+``fresean_parallel_for_case(case, ncpus)`` in ``benchmark.py``.
 
-Re-run vectorized tiles after code changes:
+| Case | velocity_fft | corr_matrix | eigen |
+|------|--------------|-------------|-------|
+| omp_n_njobs_1_vec | omp=N | omp=N | omp=N |
+| omp1_njobs_n_vec | omp=1 | n_jobs=N, omp=1 | omp=1 |
+| omp_hybrid_vec | omp=N | n_jobs=N, omp=1 | omp=N |
+
+Submit:
 
 ```bash
-mv results/results_cg/py_cases/omp_n_njobs_1_vec results/results_cg/py_cases/omp_n_njobs_1_vec_old
-mkdir -p results/results_cg/py_cases/omp_n_njobs_1_vec/logs
-bash bench/hewl/submit.sh py_fresean_vec
-bash bench/hewl/submit.sh py_fresean_vec_omp1   # OMP=1, n_jobs=N tile pool only
+bash bench/hewl/submit.sh py_fresean_vec     # uniform + tile-pool vec
+bash bench/hewl/submit.sh py_fresean_hybrid  # hybrid only
 ```
 
 ## Plots (`collect_results.py --plot`)
