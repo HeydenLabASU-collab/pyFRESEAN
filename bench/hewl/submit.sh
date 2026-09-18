@@ -7,6 +7,9 @@
 #   bash bench/hewl/submit.sh c_cg             # C CG once
 #   bash bench/hewl/submit.sh c_aa             # C AA inputs once
 #   bash bench/hewl/submit.sh py_fresean       # py FRESEAN CG case sweeps
+#   bash bench/hewl/submit.sh py_fresean_vec   # vectorized vec cases only
+#   bash bench/hewl/submit.sh py_fresean_vec_omp1  # OMP=1, n_jobs=N vec test only
+#   bash bench/hewl/submit.sh py_fresean_hybrid   # hybrid: corr n_jobs=N, rfft/eigh OMP=N
 #   bash bench/hewl/submit.sh c_spectral       # C spectral CG sweep
 #   bash bench/hewl/submit.sh aa               # AA py+C spectral (omp_n_njobs_1)
 #
@@ -31,8 +34,20 @@ CASES=(
   omp1_njobs_n_nworkers_2
   omp1_njobs_n_nworkers_n
   omp_n_njobs_1
+  omp_n_njobs_1_vec
+  omp1_njobs_n_vec
 )
 AA_CASE="omp_n_njobs_1"
+VEC_CASES=(
+  omp_n_njobs_1_vec
+  omp1_njobs_n_vec
+)
+VEC_OMP1_CASES=(
+  omp1_njobs_n_vec
+)
+HYBRID_CASES=(
+  omp_hybrid_vec
+)
 
 _bench() {
   echo "cd ${PYFRESEAN_ROOT} && python3 bench/hewl/benchmark.py $*"
@@ -97,14 +112,14 @@ _submit_c_spectral() {
   done
 }
 
-_submit_py_fresean() {
+_submit_py_fresean_cases() {
   local dep="${1:-}"
   local system="${2:-cg}"
+  shift 2
+  local case_list=("$@")
   local results_var="RESULTS_CG"
-  local case_list=("${CASES[@]}")
   if [[ "${system}" == "aa" ]]; then
     results_var="RESULTS_AA"
-    case_list=("${AA_CASE}")
   fi
   for case in "${case_list[@]}"; do
     local out="${!results_var}/py_cases/${case}"
@@ -123,6 +138,16 @@ _submit_py_fresean() {
       sleep "${STAGGER_SEC}"
     done
   done
+}
+
+_submit_py_fresean() {
+  local dep="${1:-}"
+  local system="${2:-cg}"
+  if [[ "${system}" == "aa" ]]; then
+    _submit_py_fresean_cases "${dep}" "${system}" "${AA_CASE}"
+  else
+    _submit_py_fresean_cases "${dep}" "${system}" "${CASES[@]}"
+  fi
 }
 
 _submit_aa() {
@@ -150,9 +175,18 @@ case "${PHASE}" in
   c_aa) _submit_c_aa ;;
   c_spectral) _submit_c_spectral "" "cg" ;;
   py_fresean) _submit_py_fresean "" "cg" ;;
+  py_fresean_vec)
+    _submit_py_fresean_cases "" "cg" "${VEC_CASES[@]}"
+    ;;
+  py_fresean_vec_omp1)
+    _submit_py_fresean_cases "" "cg" "${VEC_OMP1_CASES[@]}"
+    ;;
+  py_fresean_hybrid)
+    _submit_py_fresean_cases "" "cg" "${HYBRID_CASES[@]}"
+    ;;
   aa) _submit_aa ;;
   *)
-    echo "usage: submit.sh [all|py_cg|c_cg|c_aa|py_fresean|c_spectral|aa]" >&2
+    echo "usage: submit.sh [all|py_cg|c_cg|c_aa|py_fresean|py_fresean_vec|py_fresean_vec_omp1|py_fresean_hybrid|c_spectral|aa]" >&2
     echo "       legacy: cg, py, c" >&2
     exit 2
     ;;

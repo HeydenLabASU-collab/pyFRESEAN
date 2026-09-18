@@ -45,6 +45,7 @@ from pyfresean.benchmark_keys import (
     BENCH_T_TOTAL,
 )
 from pyfresean.coarsegrain.coarse import CoarseGrain
+from pyfresean.parallel import set_blas_threads
 from pyfresean.tests.c_ref.ala_dipeptide_gas_300K import N_CORR, SIGMA_CM1
 from pyfresean.tests.c_ref.hewl_solution_303K import (
     DT_PS,
@@ -85,7 +86,44 @@ BENCH_CASES: dict[str, CaseResolver] = {
     "omp1_njobs_n_nworkers_2": lambda n: (1, n, min(2, n)),
     "omp1_njobs_n_nworkers_n": lambda n: (1, n, n),
     "omp_n_njobs_1": lambda n: (n, 1, 1),
+    "omp_n_njobs_1_vec": lambda n: (n, 1, 1),
+    "omp1_njobs_n_vec": lambda n: (1, n, 1),
+    "omp_hybrid_vec": lambda n: (n, n, 1),
 }
+
+_HYBRID_PHASE_CASES = frozenset({"omp1_njobs_n_vec", "omp_hybrid_vec"})
+
+
+def fresean_parallel_for_case(
+    omp_threads: int,
+    n_jobs: int,
+    case: str,
+) -> dict[str, dict[str, int]]:
+    """Map a HEWL benchmark case to a FRESEAN ``parallel`` dict.
+
+    ``omp1_njobs_n_vec`` and ``omp_hybrid_vec`` use a tile thread pool for
+    ``corr_matrix`` only (``omp_threads=1`` there) while keeping BLAS threads
+    for ``velocity_fft`` and ``eigen``. ``omp_hybrid_vec`` sets
+    ``omp_threads=N`` on those phases; ``omp1_njobs_n_vec`` leaves them at 1.
+    Other cases apply the same ``omp_threads`` / ``n_jobs`` to ``corr_matrix``
+    and ``eigen``.
+    """
+    omp_threads = max(1, int(omp_threads))
+    n_jobs = max(1, int(n_jobs))
+
+    if case in _HYBRID_PHASE_CASES:
+        return {
+            "velocity_fft": {"n_jobs": 1, "omp_threads": omp_threads},
+            "corr_matrix": {"n_jobs": n_jobs, "omp_threads": 1},
+            "eigen": {"n_jobs": 1, "omp_threads": omp_threads},
+        }
+
+    return {
+        "velocity_fft": {"n_jobs": 1, "omp_threads": omp_threads},
+        "corr_matrix": {"n_jobs": n_jobs, "omp_threads": omp_threads},
+        "eigen": {"n_jobs": n_jobs, "omp_threads": omp_threads},
+    }
+
 
 CG_MODES = frozenset({"py_cg", "c_cg"})
 AA_PREP_MODES = frozenset({"c_aa"})
@@ -175,17 +213,6 @@ def resolve_parallel_config(
     case = aliases.get(config.lower(), config)
     omp_threads, n_jobs, n_workers = resolve_case(case, ncpus)
     return case, omp_threads, n_jobs, n_workers
-
-
-def _set_py_thread_env(omp_threads: int = 1) -> None:
-    for var in (
-        "OMP_NUM_THREADS",
-        "OPENBLAS_NUM_THREADS",
-        "MKL_NUM_THREADS",
-        "NUMEXPR_NUM_THREADS",
-        "VECLIB_MAXIMUM_THREADS",
-    ):
-        os.environ[var] = str(omp_threads)
 
 
 def _c_cg_inputs_ready(output_dir: Path) -> bool:
@@ -548,7 +575,7 @@ def _load_cg_universe(cache_dir: Path) -> tuple[CoarseGrain, mda.Universe]:
 def run_py_cg_reference(
     n_frames: int, output_dir: Path
 ) -> tuple[dict[str, float], Path]:
-    _set_py_thread_env(1)
+    set_blas_threads(1)
     paths = resolve_hewl_solution_303K_paths()
     local_tpr, local_trj = _localize_aa_trajectory(paths)
 
@@ -572,8 +599,8 @@ def run_py_fresean_aa_only(
     n_jobs: int,
     n_workers: int,
     omp_threads: int,
+    case: str = "omp_n_njobs_1",
 ) -> tuple[float, dict[str, float]]:
-    _set_py_thread_env(omp_threads)
     paths = resolve_hewl_solution_303K_paths()
     local_tpr, local_trj = _localize_aa_trajectory(paths)
     u_aa = mda.Universe(str(local_tpr), str(local_trj))
@@ -592,7 +619,7 @@ def run_py_fresean_aa_only(
         dt=DT_PS,
         sigma=SIGMA_CM1,
         lag_symmetrization="average",
-        n_jobs=n_jobs,
+        parallel=fresean_parallel_for_case(omp_threads, n_jobs, case),
     )
 
     run_kwargs = {"verbose": False, "benchmark": True, "stop": n_frames}
@@ -614,8 +641,8 @@ def run_py_fresean_only(
     n_jobs: int,
     n_workers: int,
     omp_threads: int,
+    case: str = "omp_n_njobs_1",
 ) -> tuple[float, dict[str, float], CoarseGrain]:
-    _set_py_thread_env(omp_threads)
     local_cache = _localize_cg_cache(cg_cache_dir)
     cg, u_cg = _load_cg_universe(local_cache)
 
@@ -633,7 +660,7 @@ def run_py_fresean_only(
         dt=DT_PS,
         sigma=SIGMA_CM1,
         lag_symmetrization="average",
-        n_jobs=n_jobs,
+        parallel=fresean_parallel_for_case(omp_threads, n_jobs, case),
     )
 
     if n_workers > 1:
@@ -655,8 +682,8 @@ def run_py_benchmark(
     n_workers: int,
     n_frames: int,
     omp_threads: int = 1,
+    case: str = "omp_n_njobs_1",
 ) -> tuple[float, float, dict[str, float], dict[str, float]]:
-    _set_py_thread_env(omp_threads)
     paths = resolve_hewl_solution_303K_paths()
     local_tpr, local_trj = _localize_aa_trajectory(paths)
 
@@ -682,7 +709,7 @@ def run_py_benchmark(
         dt=DT_PS,
         sigma=SIGMA_CM1,
         lag_symmetrization="average",
-        n_jobs=n_jobs,
+        parallel=fresean_parallel_for_case(omp_threads, n_jobs, case),
     )
     if n_workers > 1:
         py_fresean_phases = analysis.run(
@@ -967,6 +994,7 @@ def main(argv: list[str] | None = None) -> int:
                 n_jobs=n_jobs,
                 n_workers=n_workers,
                 omp_threads=omp_threads,
+                case=case,
             )
         else:
             if not args.cg_cache_dir.is_dir():
@@ -977,6 +1005,7 @@ def main(argv: list[str] | None = None) -> int:
                 n_jobs=n_jobs,
                 n_workers=n_workers,
                 omp_threads=omp_threads,
+                case=case,
             )
             bench_t_py_coarse = _load_py_cg_reference_total(
                 args.cg_reference_dir / "result.json"
@@ -1012,6 +1041,7 @@ def main(argv: list[str] | None = None) -> int:
             n_workers=n_workers,
             n_frames=args.n_frames,
             omp_threads=omp_threads,
+            case=case,
         )
         print(f"  coarse: {bench_t_py_coarse:.2f} s")
         print(f"  fresean: {bench_t_py_fresean:.2f} s")

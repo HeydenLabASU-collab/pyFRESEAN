@@ -73,3 +73,31 @@ python bench/hewl/collect_results.py --system aa --case omp_n_njobs_1 --plot
 | omp1_njobs_n_nworkers_2 | 1 | N | min(2, N) |
 | omp1_njobs_n_nworkers_n | 1 | N | N |
 | omp_n_njobs_1 | N | 1 | 1 |
+| omp_n_njobs_1_vec | N | 1 | 1 (vectorized corr tiles) |
+| omp1_njobs_n_vec | 1 | N | 1 (vectorized tiles, thread pool) |
+| omp_n_njobs_1_vec_old | N | 1 | 1 (archived vectorized run) |
+
+Re-run vectorized tiles after code changes:
+
+```bash
+mv results/results_cg/py_cases/omp_n_njobs_1_vec results/results_cg/py_cases/omp_n_njobs_1_vec_old
+mkdir -p results/results_cg/py_cases/omp_n_njobs_1_vec/logs
+bash bench/hewl/submit.sh py_fresean_vec
+bash bench/hewl/submit.sh py_fresean_vec_omp1   # OMP=1, n_jobs=N tile pool only
+```
+
+## Plots (`collect_results.py --plot`)
+
+Per case under `results/results_{cg,aa}/plots/{case}/`:
+
+- `total_vs_c.png` — wall time vs C covar+eigen
+- `breakdown.png` — velocity / corr matrix / eigen phases
+- `speedup.png` — \(T_1 / T_N\)
+- `inverse_walltime.png` — \(1 / T_N\)
+
+Overview under `plots/`:
+
+- `total_all_cases.png`
+- `inverse_walltime_all_cases.png`
+- `speedup_all_cases.png`
+- `vectorized_corr_comparison.png` — `omp_n_njobs_1` vs `omp_n_njobs_1_vec`

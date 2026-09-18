@@ -115,6 +115,25 @@ class TestFRESEAN:
         with pytest.raises(ValueError, match="n_jobs"):
             FRESEAN(universe, n_corr=4, n_jobs=0)
 
+    def test_invalid_parallel_phase(self, universe):
+        with pytest.raises(ValueError, match="unknown parallel phase"):
+            FRESEAN(
+                universe,
+                n_corr=4,
+                parallel={"not_a_phase": {"n_jobs": 1}},
+            )
+
+    def test_parallel_per_phase_overrides_n_jobs(self, universe):
+        analysis = FRESEAN(
+            universe,
+            n_corr=4,
+            n_jobs=4,
+            parallel={"eigen": {"n_jobs": 1, "omp_threads": 1}},
+        )
+        assert analysis._parallel["corr_matrix"].n_jobs == 4
+        assert analysis._parallel["eigen"].n_jobs == 1
+        assert analysis._parallel["velocity_fft"].n_jobs == 1
+
     def test_corr_matrix_tiles_cover_upper_triangle(self):
         budget_pairs = 6
         tiles = FRESEAN._corr_matrix_tiles(5, budget_pairs)

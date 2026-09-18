@@ -13,7 +13,7 @@ import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
-from typing import TYPE_CHECKING, Any, Literal, Optional, Union
+from typing import TYPE_CHECKING, Any, Literal, Mapping, Optional, Union
 
 import numpy as np
 from MDAnalysis.analysis.backends import BackendBase, BackendSerial
@@ -29,6 +29,12 @@ from pyfresean.benchmark_keys import (
     BENCH_T_EIGEN,
     BENCH_T_VELOCITY_MATRIX,
     finalize_fresean_benchmark,
+)
+from pyfresean.parallel import (
+    PhaseParallelism,
+    blas_thread_context,
+    build_phase_parallelism,
+    resolve_n_jobs,
 )
 
 if TYPE_CHECKING:
@@ -70,10 +76,23 @@ class FRESEAN(AnalysisBase):
         second half. The latter is more appropriate for cross-correlations on
         finite trajectories.
     n_jobs: int or None
-        Number of threads for :meth:`_conclude` work. ``1`` or ``None`` runs
-        serially (default). ``-1`` uses :func:`os.cpu_count`. Used for the
-        vectorized correlation-matrix tile build and for per-frequency
-        :func:`numpy.linalg.eigh` diagonalization.
+        Legacy shorthand for :meth:`_conclude` thread pools on ``corr_matrix``
+        and ``eigen``. ``1`` or ``None`` runs serially (default). ``-1`` uses
+        :func:`os.cpu_count`. Prefer ``parallel`` for per-phase control.
+    parallel: dict or None
+        Optional per-phase threading for :meth:`_conclude`. Keys are
+        ``velocity_fft``, ``corr_matrix``, and ``eigen``. Each value is a dict
+        with optional ``n_jobs`` (``ThreadPoolExecutor`` workers, default
+        ``1``) and ``omp_threads`` (BLAS/OpenMP threads inside NumPy/SciPy,
+        default ``1``). Example — tile pool for corr, BLAS for eigen::
+
+            parallel={
+                "velocity_fft": {"n_jobs": 1, "omp_threads": 8},
+                "corr_matrix": {"n_jobs": 8, "omp_threads": 1},
+                "eigen": {"n_jobs": 1, "omp_threads": 8},
+            }
+
+        Entries in ``parallel`` override ``n_jobs`` for the matching phase.
     run(..., n_workers=N, backend="multiprocessing")
         When ``n_workers`` > 1 and a parallel backend is used, MDAnalysis
         splits the trajectory across workers for :meth:`_single_frame`
@@ -142,6 +161,7 @@ class FRESEAN(AnalysisBase):
         sigma: float = 10.0,
         lag_symmetrization: LagSymmetrization = "mirror",
         n_jobs: Optional[int] = 1,
+        parallel: Optional[Mapping[str, Mapping[str, int]]] = None,
         **kwargs,
     ):
         # the below line must be kept to initialize the AnalysisBase class!
@@ -164,21 +184,37 @@ class FRESEAN(AnalysisBase):
                 f"got {lag_symmetrization!r}"
             )
         self.lag_symmetrization = lag_symmetrization
-        if n_jobs is not None and n_jobs != 1 and n_jobs != -1 and n_jobs < 2:
-            raise ValueError(
-                "n_jobs must be None, 1, -1, or an integer >= 2; "
-                f"got {n_jobs!r}"
-            )
         self.n_jobs = n_jobs
+        self._parallel = build_phase_parallelism(parallel, n_jobs=n_jobs)
         self.benchmark: Optional[dict[str, float]] = None
 
-    @staticmethod
-    def _resolve_n_jobs(n_jobs: Optional[int]) -> int:
-        if n_jobs is None or n_jobs == 1:
-            return 1
-        if n_jobs < 0:
-            return os.cpu_count() or 1
-        return n_jobs
+    def _phase_parallel(self, phase: str) -> PhaseParallelism:
+        return self._parallel[phase]
+
+    def _rfft_velocities(self, velocities: np.ndarray) -> np.ndarray:
+        """Real FFT of the mass-weighted velocity matrix along the time axis."""
+        spec = self._phase_parallel("velocity_fft")
+        n_elements = velocities.shape[0]
+        n_freq = velocities.shape[1] // 2 + 1
+        spectra = np.empty((n_elements, n_freq), dtype=np.complex128)
+
+        def transform_rows(i0: int, i1: int) -> None:
+            spectra[i0:i1] = rfft(velocities[i0:i1], axis=1)
+
+        with blas_thread_context(spec.omp_threads):
+            max_workers = resolve_n_jobs(spec.n_jobs)
+            if max_workers == 1:
+                transform_rows(0, n_elements)
+            else:
+                row_chunks = np.array_split(np.arange(n_elements), max_workers)
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    list(
+                        executor.map(
+                            lambda rows: transform_rows(int(rows[0]), int(rows[-1]) + 1),
+                            row_chunks,
+                        )
+                    )
+        return spectra
 
     def _build_windowed_lags(
         self,
@@ -308,13 +344,15 @@ class FRESEAN(AnalysisBase):
             n_corr=n_corr,
             n_frames=n_frames,
         )
-        max_workers = self._resolve_n_jobs(self.n_jobs)
-        if max_workers == 1:
-            for tile in tiles:
-                fill_tile(tile)
-        else:
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                list(executor.map(fill_tile, tiles))
+        spec = self._phase_parallel("corr_matrix")
+        with blas_thread_context(spec.omp_threads):
+            max_workers = resolve_n_jobs(spec.n_jobs)
+            if max_workers == 1:
+                for tile in tiles:
+                    fill_tile(tile)
+            else:
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    list(executor.map(fill_tile, tiles))
         self._symmetrize_corr_matrix(corr_matrix, n_elements)
 
     def _fill_eigen_at_frequency(
@@ -339,28 +377,30 @@ class FRESEAN(AnalysisBase):
         eigenvectors = np.empty(
             (n_corr, n_elements, n_elements), dtype=np.float64
         )
-        max_workers = self._resolve_n_jobs(self.n_jobs)
-        if max_workers == 1:
-            for freq_index in range(n_corr):
-                self._fill_eigen_at_frequency(
-                    freq_index,
-                    corr_matrix,
-                    eigenvalues,
-                    eigenvectors,
-                )
-        else:
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                list(
-                    executor.map(
-                        lambda freq_index: self._fill_eigen_at_frequency(
-                            freq_index,
-                            corr_matrix,
-                            eigenvalues,
-                            eigenvectors,
-                        ),
-                        range(n_corr),
+        spec = self._phase_parallel("eigen")
+        with blas_thread_context(spec.omp_threads):
+            max_workers = resolve_n_jobs(spec.n_jobs)
+            if max_workers == 1:
+                for freq_index in range(n_corr):
+                    self._fill_eigen_at_frequency(
+                        freq_index,
+                        corr_matrix,
+                        eigenvalues,
+                        eigenvectors,
                     )
-                )
+            else:
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    list(
+                        executor.map(
+                            lambda freq_index: self._fill_eigen_at_frequency(
+                                freq_index,
+                                corr_matrix,
+                                eigenvalues,
+                                eigenvectors,
+                            ),
+                            range(n_corr),
+                        )
+                    )
         return eigenvalues, eigenvectors
 
     def _init_run_metadata(self) -> None:
@@ -421,7 +461,7 @@ class FRESEAN(AnalysisBase):
         if timings is not None:
             t_corr = time.perf_counter()
 
-        velocities = rfft(self.results.velocities, axis=1)
+        velocities = self._rfft_velocities(self.results.velocities)
         corr_matrix = self.results.corr_matrix
         win_time = self.results.win_time
 
