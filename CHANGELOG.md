@@ -22,6 +22,21 @@ The rules for this file:
 - @amruthesht
 
 ### Added
+- Per-phase parallelism for ``FRESEAN`` via a ``parallel`` dict
+  (``velocity_fft``, ``corr_matrix``, ``eigen``), each with ``n_jobs`` and
+  ``omp_threads``; ``pyfresean.parallel`` helpers and runtime BLAS limits
+  through ``threadpoolctl``. (PR #6)
+- Memory-budget upper-triangle tiling for the correlation matrix, optional
+  tile ``ThreadPoolExecutor`` when ``corr_matrix.n_jobs > 1``, and
+  symmetrization after fill. (PR #6)
+- Real FFT path in ``FRESEAN._conclude``: ``rfft`` velocities and lag
+  windowing, ``irfft`` for tile cross-correlation; ``float64`` velocity
+  storage. (PR #6)
+- HEWL benchmark case ``omp_hybrid_vec`` (corr tile pool + BLAS eigen) and
+  ``fresean_parallel_for_case()`` mapping; ``submit.sh`` phase
+  ``py_fresean_hybrid``. (PR #6)
+- ``threadpoolctl>=3.1.0`` dependency and ``pyfresean/tests/test_parallel.py``.
+  (PR #6)
 - ``benchmark=True`` on ``FRESEAN.run`` and ``CoarseGrain.cg_universe`` /
   ``build_universe`` for wall-time dicts; shared ``bench_t_*`` keys in ``pyfresean.benchmark_keys``. (PR #5)
 - HEWL pyfresean vs FRESEAN COARSE (C) benchmark setup under
@@ -74,6 +89,12 @@ The rules for this file:
 <!-- Bug fixes -->
 
 ### Changed
+- ``FRESEAN`` correlation-matrix construction uses vectorized tiles and
+  per-phase ``blas_thread_context`` instead of a single global ``n_jobs``.
+  (PR #6)
+- HEWL ``benchmark.py`` ``py_fresean`` cases reduced to
+  ``omp_n_njobs_1_vec``, ``omp1_njobs_n_vec``, and ``omp_hybrid_vec``;
+  ``--mode`` is required. (PR #6)
 - C CG input generation for HEWL benchmarks consolidated into
   ``benchmark.py --mode c_cg`` (replaces standalone shell script). (PR #5)
 - ``c_ref`` FRESEAN comparisons use ``lag_symmetrization="average"`` to match
@@ -86,5 +107,11 @@ The rules for this file:
 <!-- Soon-to-be removed features -->
 
 ### Removed
+- ``FRESEAN`` top-level ``n_jobs`` and legacy ``build_phase_parallelism``
+  ``n_jobs`` shorthand; use ``parallel`` instead. (PR #6)
+- HEWL benchmark ``all`` mode, mode aliases (``cg`` / ``py`` / ``c``),
+  ``--parallel-config`` / ``--n-jobs`` / ``--omp-threads`` CLI overrides,
+  and pre-vectorization ``py_fresean`` cases
+  (``omp1_njobs_n_nworkers_*``, ``omp_n_njobs_1``). (PR #6)
 - ``bench/hewl/prepare_c_covar_inputs.sh`` (superseded by ``c_cg`` mode).
   (PR #5)
