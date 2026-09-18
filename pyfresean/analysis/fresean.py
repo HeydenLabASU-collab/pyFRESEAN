@@ -13,7 +13,7 @@ import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
-from typing import TYPE_CHECKING, Any, Literal, Optional, Union
+from typing import TYPE_CHECKING, Any, Literal, Mapping, Optional, Union
 
 import numpy as np
 from MDAnalysis.analysis.backends import BackendBase, BackendSerial
@@ -22,13 +22,19 @@ LagSymmetrization = Literal["mirror", "average"]
 
 from MDAnalysis.analysis.base import AnalysisBase, Results
 from MDAnalysis.analysis.results import ResultsGroup
-from scipy.fft import fft, ifft
+from scipy.fft import ifft, irfft, rfft
 
 from pyfresean.benchmark_keys import (
     BENCH_T_CORR_MATRIX,
     BENCH_T_EIGEN,
     BENCH_T_VELOCITY_MATRIX,
     finalize_fresean_benchmark,
+)
+from pyfresean.parallel import (
+    PhaseParallelism,
+    blas_thread_context,
+    build_phase_parallelism,
+    resolve_n_jobs,
 )
 
 if TYPE_CHECKING:
@@ -69,11 +75,19 @@ class FRESEAN(AnalysisBase):
         negative-lag bin from :func:`scipy.fft.ifft`), then mirror for the
         second half. The latter is more appropriate for cross-correlations on
         finite trajectories.
-    n_jobs: int or None
-        Number of threads for :meth:`_conclude` work. ``1`` or ``None`` runs
-        serially (default). ``-1`` uses :func:`os.cpu_count`. Used for the
-        velocity cross-correlation loop (parallel over row index ``i``) and
-        for per-frequency :func:`numpy.linalg.eigh` diagonalization.
+    parallel: dict or None
+        Optional per-phase threading for :meth:`_conclude`. Keys are
+        ``velocity_fft``, ``corr_matrix``, and ``eigen``. Each value is a dict
+        with optional ``n_jobs`` (``ThreadPoolExecutor`` workers, default
+        ``1``) and ``omp_threads`` (BLAS/OpenMP threads inside NumPy/SciPy,
+        default ``1``). Example — tile pool for corr, BLAS for eigen::
+
+            parallel={
+                "velocity_fft": {"n_jobs": 1, "omp_threads": 8},
+                "corr_matrix": {"n_jobs": 8, "omp_threads": 1},
+                "eigen": {"n_jobs": 1, "omp_threads": 8},
+            }
+
     run(..., n_workers=N, backend="multiprocessing")
         When ``n_workers`` > 1 and a parallel backend is used, MDAnalysis
         splits the trajectory across workers for :meth:`_single_frame`
@@ -141,7 +155,7 @@ class FRESEAN(AnalysisBase):
         dt: float = 0.004,
         sigma: float = 10.0,
         lag_symmetrization: LagSymmetrization = "mirror",
-        n_jobs: Optional[int] = 1,
+        parallel: Optional[Mapping[str, Mapping[str, int]]] = None,
         **kwargs,
     ):
         # the below line must be kept to initialize the AnalysisBase class!
@@ -164,21 +178,36 @@ class FRESEAN(AnalysisBase):
                 f"got {lag_symmetrization!r}"
             )
         self.lag_symmetrization = lag_symmetrization
-        if n_jobs is not None and n_jobs != 1 and n_jobs != -1 and n_jobs < 2:
-            raise ValueError(
-                "n_jobs must be None, 1, -1, or an integer >= 2; "
-                f"got {n_jobs!r}"
-            )
-        self.n_jobs = n_jobs
+        self._parallel = build_phase_parallelism(parallel)
         self.benchmark: Optional[dict[str, float]] = None
 
-    @staticmethod
-    def _resolve_n_jobs(n_jobs: Optional[int]) -> int:
-        if n_jobs is None or n_jobs == 1:
-            return 1
-        if n_jobs < 0:
-            return os.cpu_count() or 1
-        return n_jobs
+    def _phase_parallel(self, phase: str) -> PhaseParallelism:
+        return self._parallel[phase]
+
+    def _rfft_velocities(self, velocities: np.ndarray) -> np.ndarray:
+        """Real FFT of the mass-weighted velocity matrix along the time axis."""
+        spec = self._phase_parallel("velocity_fft")
+        n_elements = velocities.shape[0]
+        n_freq = velocities.shape[1] // 2 + 1
+        spectra = np.empty((n_elements, n_freq), dtype=np.complex128)
+
+        def transform_rows(i0: int, i1: int) -> None:
+            spectra[i0:i1] = rfft(velocities[i0:i1], axis=1)
+
+        with blas_thread_context(spec.omp_threads):
+            max_workers = resolve_n_jobs(spec.n_jobs)
+            if max_workers == 1:
+                transform_rows(0, n_elements)
+            else:
+                row_chunks = np.array_split(np.arange(n_elements), max_workers)
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    list(
+                        executor.map(
+                            lambda rows: transform_rows(int(rows[0]), int(rows[-1]) + 1),
+                            row_chunks,
+                        )
+                    )
+        return spectra
 
     def _build_windowed_lags(
         self,
@@ -187,55 +216,106 @@ class FRESEAN(AnalysisBase):
         n_frames: int,
     ) -> np.ndarray:
         """Pack symmetrized lags into the length ``2 * n_corr - 1`` FFT input."""
-        tmp_windowed = np.zeros(2 * n_corr - 1, dtype=np.float64)
-        if self.lag_symmetrization == "average":
-            tmp_windowed[0] = tmp_time[0]
-            for k in range(1, n_corr):
-                tmp_windowed[k] = (tmp_time[k] + tmp_time[n_frames - k]) / 2.0
-        else:
-            tmp_windowed[:n_corr] = tmp_time[:n_corr]
-        tmp_windowed[n_corr:] = tmp_windowed[n_corr - 1 : 0 : -1]
-        return tmp_windowed
+        return self._window_time_batch(
+            tmp_time,
+            n_corr,
+            n_frames,
+            win_time=None,
+            lag_symmetrization=self.lag_symmetrization,
+        )
 
-    def _corr_spectrum_from_velocities(
-        self,
-        vel_i: np.ndarray,
-        vel_j: np.ndarray,
-        win_time: np.ndarray,
+    @staticmethod
+    def _window_time_batch(
+        tmp_time: np.ndarray,
         n_corr: int,
         n_frames: int,
+        win_time: np.ndarray | None,
+        lag_symmetrization: LagSymmetrization,
     ) -> np.ndarray:
-        tmp_freq = np.real(vel_i * vel_j.conj())
-        tmp_time = np.real(ifft(tmp_freq))
-        tmp_windowed = self._build_windowed_lags(tmp_time, n_corr, n_frames)
-        tmp_windowed *= win_time
-        return np.real(fft(tmp_windowed)[:n_corr])
+        """Window and mirror/average lag blocks for arbitrary leading batch dims."""
+        lag_len = 2 * n_corr - 1
+        windowed = np.zeros(tmp_time.shape[:-1] + (lag_len,), dtype=np.float64)
+        windowed[..., 0] = tmp_time[..., 0]
+        if lag_symmetrization == "average" and n_corr > 1:
+            k = np.arange(1, n_corr)
+            windowed[..., 1:n_corr] = (
+                tmp_time[..., 1:n_corr] + tmp_time[..., n_frames - k]
+            ) / 2.0
+        else:
+            windowed[..., :n_corr] = tmp_time[..., :n_corr]
+        windowed[..., n_corr:] = windowed[..., n_corr - 1 : 0 : -1]
+        if win_time is not None:
+            windowed *= win_time
+        return windowed
 
-    def _fill_corr_matrix_row(
+    @staticmethod
+    def _corr_matrix_budget_pairs(
+        n_frames: int,
+        max_working_bytes: int = 512 * 1024 * 1024,
+        n_temp_arrays: int = 4,
+    ) -> int:
+        """Max ``(i, j)`` pairs per correlation-matrix tile within scratch RAM."""
+        per_pair = max(n_frames * 8 * n_temp_arrays, 1)
+        return max(1, max_working_bytes // per_pair)
+
+    @staticmethod
+    def _corr_matrix_tiles(
+        n_elements: int,
+        budget_pairs: int,
+    ) -> list[tuple[int, int, int, int]]:
+        """Upper-triangle tile bounds ``(i0, i1, j0, j1)`` for one corr build."""
+        tiles: list[tuple[int, int, int, int]] = []
+        i0 = 0
+        while i0 < n_elements:
+            rem_cols = n_elements - i0
+            rem_rows = n_elements - i0
+            ideal_row = budget_pairs / rem_cols
+            if ideal_row >= 1.0:
+                row_size = max(1, min(rem_rows, int(ideal_row)))
+                tiles.append((i0, i0 + row_size, i0, n_elements))
+                i0 += row_size
+            else:
+                col_size = max(1, min(rem_cols, int(budget_pairs)))
+                j0 = i0
+                while j0 < n_elements:
+                    tiles.append((i0, i0 + 1, j0, min(j0 + col_size, n_elements)))
+                    j0 += col_size
+                i0 += 1
+        return tiles
+
+    def _symmetrize_corr_matrix(
+        self, corr_matrix: np.ndarray, n_elements: int
+    ) -> None:
+        i_upper, j_upper = np.triu_indices(n_elements, k=1)
+        corr_matrix[:, j_upper, i_upper] = corr_matrix[:, i_upper, j_upper]
+
+    def _fill_corr_matrix_tile(
         self,
-        i: int,
+        tile: tuple[int, int, int, int],
         velocities: np.ndarray,
         corr_matrix: np.ndarray,
         win_time: np.ndarray,
         n_corr: int,
         n_frames: int,
-        n_elements: int,
     ) -> None:
-        for j in range(i, n_elements):
-            corr_matrix[:, i, j] = self._corr_spectrum_from_velocities(
-                velocities[i],
-                velocities[j],
-                win_time,
-                n_corr,
-                n_frames,
-            )
-
-    def _symmetrize_corr_matrix(
-        self, corr_matrix: np.ndarray, n_elements: int
-    ) -> None:
-        for i in range(n_elements):
-            for j in range(i + 1, n_elements):
-                corr_matrix[:, j, i] = corr_matrix[:, i, j]
+        """Fill one upper-triangle tile of ``corr_matrix``."""
+        i0, i1, j0, j1 = tile
+        row_vel = velocities[i0:i1]
+        col_vel = velocities[j0:j1]
+        cross_freq = np.real(
+            row_vel[:, None, :] * np.conj(col_vel[None, :, :])
+        )
+        tmp_time = np.real(irfft(cross_freq, n=n_frames, axis=-1))
+        windowed = self._window_time_batch(
+            tmp_time,
+            n_corr,
+            n_frames,
+            win_time,
+            self.lag_symmetrization,
+        )
+        # windowed is real with length 2*n_corr-1, so rfft yields n_corr bins.
+        spectra = np.real(rfft(windowed, axis=-1))
+        corr_matrix[:, i0:i1, j0:j1] = np.moveaxis(spectra, -1, 0)
 
     def _build_corr_matrix(
         self,
@@ -246,34 +326,26 @@ class FRESEAN(AnalysisBase):
         n_frames: int,
         n_elements: int,
     ) -> None:
-        max_workers = self._resolve_n_jobs(self.n_jobs)
-        if max_workers == 1:
-            for i in range(n_elements):
-                self._fill_corr_matrix_row(
-                    i,
-                    velocities,
-                    corr_matrix,
-                    win_time,
-                    n_corr,
-                    n_frames,
-                    n_elements,
-                )
-        else:
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                list(
-                    executor.map(
-                        lambda i: self._fill_corr_matrix_row(
-                            i,
-                            velocities,
-                            corr_matrix,
-                            win_time,
-                            n_corr,
-                            n_frames,
-                            n_elements,
-                        ),
-                        range(n_elements),
-                    )
-                )
+        """Build the velocity cross-correlation matrix (vectorized tiles)."""
+        budget_pairs = self._corr_matrix_budget_pairs(n_frames)
+        tiles = self._corr_matrix_tiles(n_elements, budget_pairs)
+        fill_tile = partial(
+            self._fill_corr_matrix_tile,
+            velocities=velocities,
+            corr_matrix=corr_matrix,
+            win_time=win_time,
+            n_corr=n_corr,
+            n_frames=n_frames,
+        )
+        spec = self._phase_parallel("corr_matrix")
+        with blas_thread_context(spec.omp_threads):
+            max_workers = resolve_n_jobs(spec.n_jobs)
+            if max_workers == 1:
+                for tile in tiles:
+                    fill_tile(tile)
+            else:
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    list(executor.map(fill_tile, tiles))
         self._symmetrize_corr_matrix(corr_matrix, n_elements)
 
     def _fill_eigen_at_frequency(
@@ -298,28 +370,30 @@ class FRESEAN(AnalysisBase):
         eigenvectors = np.empty(
             (n_corr, n_elements, n_elements), dtype=np.float64
         )
-        max_workers = self._resolve_n_jobs(self.n_jobs)
-        if max_workers == 1:
-            for freq_index in range(n_corr):
-                self._fill_eigen_at_frequency(
-                    freq_index,
-                    corr_matrix,
-                    eigenvalues,
-                    eigenvectors,
-                )
-        else:
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                list(
-                    executor.map(
-                        lambda freq_index: self._fill_eigen_at_frequency(
-                            freq_index,
-                            corr_matrix,
-                            eigenvalues,
-                            eigenvectors,
-                        ),
-                        range(n_corr),
+        spec = self._phase_parallel("eigen")
+        with blas_thread_context(spec.omp_threads):
+            max_workers = resolve_n_jobs(spec.n_jobs)
+            if max_workers == 1:
+                for freq_index in range(n_corr):
+                    self._fill_eigen_at_frequency(
+                        freq_index,
+                        corr_matrix,
+                        eigenvalues,
+                        eigenvectors,
                     )
-                )
+            else:
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    list(
+                        executor.map(
+                            lambda freq_index: self._fill_eigen_at_frequency(
+                                freq_index,
+                                corr_matrix,
+                                eigenvalues,
+                                eigenvectors,
+                            ),
+                            range(n_corr),
+                        )
+                    )
         return eigenvalues, eigenvectors
 
     def _init_run_metadata(self) -> None:
@@ -341,7 +415,7 @@ class FRESEAN(AnalysisBase):
         n_elements = self._n_elements
         self.results = Results(
             velocities=np.zeros(
-                (n_elements, self.n_frames), dtype=np.complex128
+                (n_elements, self.n_frames), dtype=np.float64
             ),
             corr_matrix=np.empty((self.n_corr, n_elements, n_elements)),
             freqs=freqs,
@@ -380,7 +454,7 @@ class FRESEAN(AnalysisBase):
         if timings is not None:
             t_corr = time.perf_counter()
 
-        velocities = fft(self.results.velocities, axis=1)
+        velocities = self._rfft_velocities(self.results.velocities)
         corr_matrix = self.results.corr_matrix
         win_time = self.results.win_time
 

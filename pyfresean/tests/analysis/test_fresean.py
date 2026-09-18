@@ -111,13 +111,57 @@ class TestFRESEAN:
         assert np.all(np.isfinite(analysis.results.corr_matrix))
         assert np.all(np.isfinite(analysis.results.vdos_total))
 
-    def test_invalid_n_jobs(self, universe):
+    def test_invalid_parallel_n_jobs(self, universe):
         with pytest.raises(ValueError, match="n_jobs"):
-            FRESEAN(universe, n_corr=4, n_jobs=0)
+            FRESEAN(
+                universe,
+                n_corr=4,
+                parallel={"corr_matrix": {"n_jobs": 0}},
+            )
+
+    def test_invalid_parallel_phase(self, universe):
+        with pytest.raises(ValueError, match="unknown parallel phase"):
+            FRESEAN(
+                universe,
+                n_corr=4,
+                parallel={"not_a_phase": {"n_jobs": 1}},
+            )
+
+    def test_parallel_per_phase_settings(self, universe):
+        analysis = FRESEAN(
+            universe,
+            n_corr=4,
+            parallel={
+                "corr_matrix": {"n_jobs": 4, "omp_threads": 1},
+                "eigen": {"n_jobs": 1, "omp_threads": 1},
+            },
+        )
+        assert analysis._parallel["corr_matrix"].n_jobs == 4
+        assert analysis._parallel["eigen"].n_jobs == 1
+        assert analysis._parallel["velocity_fft"].n_jobs == 1
+
+    def test_corr_matrix_tiles_cover_upper_triangle(self):
+        budget_pairs = 6
+        tiles = FRESEAN._corr_matrix_tiles(5, budget_pairs)
+        covered = set()
+        for i0, i1, j0, j1 in tiles:
+            for i in range(i0, i1):
+                for j in range(j0, j1):
+                    if j >= i:
+                        covered.add((i, j))
+        expected = {
+            (i, j) for i in range(5) for j in range(i, 5)
+        }
+        assert covered == expected
+        assert all(j0 >= i0 for i0, _, j0, _ in tiles)
 
     def test_parallel_n_jobs_matches_serial(self, universe):
-        serial = FRESEAN(universe, n_corr=4, n_jobs=1)
-        parallel = FRESEAN(universe, n_corr=4, n_jobs=2)
+        serial = FRESEAN(universe, n_corr=4)
+        parallel = FRESEAN(
+            universe,
+            n_corr=4,
+            parallel={"corr_matrix": {"n_jobs": 2, "omp_threads": 1}},
+        )
         serial.run()
         parallel.run()
         np.testing.assert_allclose(
@@ -146,8 +190,8 @@ class TestFRESEAN:
         )
 
     def test_parallel_corr_matrix_matches_serial(self, universe):
-        serial = FRESEAN(universe, n_corr=4, n_jobs=1)
-        parallel = FRESEAN(universe, n_corr=4, n_jobs=1)
+        serial = FRESEAN(universe, n_corr=4)
+        parallel = FRESEAN(universe, n_corr=4)
         serial.run()
         parallel.run()
         np.testing.assert_allclose(
@@ -199,8 +243,8 @@ class TestFRESEAN:
         assert np.all(np.isfinite(analysis.results.vdos_total))
 
     def test_multiprocessing_run_matches_serial(self, universe):
-        serial = FRESEAN(universe, n_corr=4, n_jobs=1)
-        parallel = FRESEAN(universe, n_corr=4, n_jobs=1)
+        serial = FRESEAN(universe, n_corr=4)
+        parallel = FRESEAN(universe, n_corr=4)
         serial.run()
         parallel.run(n_workers=2, backend="multiprocessing", verbose=False)
         np.testing.assert_allclose(

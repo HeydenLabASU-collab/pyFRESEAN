@@ -12,10 +12,17 @@ bench/hewl/
 ├── cg_reference/      # one-time CG (gitignored except README)
 │   ├── c_ref/
 │   └── pyfresean/
+├── aa_reference/      # one-time AA inputs for C (gitignored except README)
+│   └── c_ref/
 └── results/           # spectral sweeps (gitignored except README)
-    ├── c_spectral/
-    ├── py_cases/
-    └── plots/
+    ├── results_cg/
+    │   ├── c_spectral/
+    │   ├── py_cases/
+    │   └── plots/
+    └── results_aa/
+        ├── c_spectral/
+        ├── py_cases/
+        └── plots/
 ```
 
 ## Modes
@@ -24,8 +31,9 @@ bench/hewl/
 |------|------|--------|
 | `py_cg` | py coarse-grain once | `cg_reference/pyfresean/` |
 | `c_cg` | C `fresean coarse` once | `cg_reference/c_ref/` |
-| `py_fresean` | py spectral sweep | `results/py_cases/{case}/` |
-| `c_spectral` | C covar+eigen sweep | `results/c_spectral/` |
+| `c_aa` | C all-atom inputs once | `aa_reference/c_ref/` |
+| `py_fresean` | py spectral sweep | `results/results_{cg,aa}/py_cases/{case}/` |
+| `c_spectral` | C covar+eigen sweep | `results/results_{cg,aa}/c_spectral/` |
 
 Plots compare `py_fresean` vs `c_spectral` only (CG excluded from both sides).
 
@@ -53,14 +61,40 @@ bash bench/hewl/submit.sh all
 Plot:
 
 ```bash
-python bench/hewl/collect_results.py --case all --plot
+python bench/hewl/collect_results.py --system cg --case all --plot
+python bench/hewl/collect_results.py --system aa --case omp_n_njobs_1 --plot
 ```
 
 ## `py_fresean` cases
 
-| Case | OMP | n_jobs | n_workers |
-|------|-----|--------|-----------|
-| omp1_njobs_n_nworkers_1 | 1 | N | 1 |
-| omp1_njobs_n_nworkers_2 | 1 | N | min(2, N) |
-| omp1_njobs_n_nworkers_n | 1 | N | N |
-| omp_n_njobs_1 | N | 1 | 1 |
+Each case maps to a ``FRESEAN(parallel=...)`` dict via
+``fresean_parallel_for_case(case, ncpus)`` in ``benchmark.py``.
+
+| Case | velocity_fft | corr_matrix | eigen |
+|------|--------------|-------------|-------|
+| omp_n_njobs_1_vec | omp=N | omp=N | omp=N |
+| omp1_njobs_n_vec | omp=1 | n_jobs=N, omp=1 | omp=1 |
+| omp_hybrid_vec | omp=N | n_jobs=N, omp=1 | omp=N |
+
+Submit:
+
+```bash
+bash bench/hewl/submit.sh py_fresean_vec     # uniform + tile-pool vec
+bash bench/hewl/submit.sh py_fresean_hybrid  # hybrid only
+```
+
+## Plots (`collect_results.py --plot`)
+
+Per case under `results/results_{cg,aa}/plots/{case}/`:
+
+- `total_vs_c.png` — wall time vs C covar+eigen
+- `breakdown.png` — velocity / corr matrix / eigen phases
+- `speedup.png` — \(T_1 / T_N\)
+- `inverse_walltime.png` — \(1 / T_N\)
+
+Overview under `plots/`:
+
+- `total_all_cases.png`
+- `inverse_walltime_all_cases.png`
+- `speedup_all_cases.png`
+- `vectorized_corr_comparison.png` — `omp_n_njobs_1` vs `omp_n_njobs_1_vec`
