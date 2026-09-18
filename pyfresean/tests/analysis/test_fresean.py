@@ -115,6 +115,21 @@ class TestFRESEAN:
         with pytest.raises(ValueError, match="n_jobs"):
             FRESEAN(universe, n_corr=4, n_jobs=0)
 
+    def test_corr_matrix_tiles_cover_upper_triangle(self):
+        budget_pairs = 6
+        tiles = FRESEAN._corr_matrix_tiles(5, budget_pairs)
+        covered = set()
+        for i0, i1, j0, j1 in tiles:
+            for i in range(i0, i1):
+                for j in range(j0, j1):
+                    if j >= i:
+                        covered.add((i, j))
+        expected = {
+            (i, j) for i in range(5) for j in range(i, 5)
+        }
+        assert covered == expected
+        assert all(j0 >= i0 for i0, _, j0, _ in tiles)
+
     def test_parallel_n_jobs_matches_serial(self, universe):
         serial = FRESEAN(universe, n_corr=4, n_jobs=1)
         parallel = FRESEAN(universe, n_corr=4, n_jobs=2)

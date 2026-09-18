@@ -22,7 +22,7 @@ LagSymmetrization = Literal["mirror", "average"]
 
 from MDAnalysis.analysis.base import AnalysisBase, Results
 from MDAnalysis.analysis.results import ResultsGroup
-from scipy.fft import fft, ifft
+from scipy.fft import ifft, irfft, rfft
 
 from pyfresean.benchmark_keys import (
     BENCH_T_CORR_MATRIX,
@@ -70,10 +70,10 @@ class FRESEAN(AnalysisBase):
         second half. The latter is more appropriate for cross-correlations on
         finite trajectories.
     n_jobs: int or None
-        Number of threads for per-frequency :func:`numpy.linalg.eigh`
-        diagonalization in :meth:`_conclude`. ``1`` or ``None`` runs serially
-        (default). ``-1`` uses :func:`os.cpu_count`. The correlation-matrix
-        build is vectorized and does not use ``n_jobs``.
+        Number of threads for :meth:`_conclude` work. ``1`` or ``None`` runs
+        serially (default). ``-1`` uses :func:`os.cpu_count`. Used for the
+        vectorized correlation-matrix tile build and for per-frequency
+        :func:`numpy.linalg.eigh` diagonalization.
     run(..., n_workers=N, backend="multiprocessing")
         When ``n_workers`` > 1 and a parallel backend is used, MDAnalysis
         splits the trajectory across workers for :meth:`_single_frame`
@@ -220,20 +220,73 @@ class FRESEAN(AnalysisBase):
         return windowed
 
     @staticmethod
-    def _corr_matrix_block_size(
-        n_columns: int,
+    def _corr_matrix_budget_pairs(
         n_frames: int,
         max_working_bytes: int = 512 * 1024 * 1024,
+        n_temp_arrays: int = 4,
     ) -> int:
-        """Block length along rows/cols for ``(block, n_columns, n_frames)``."""
-        per_row = max(n_columns * n_frames * 8, 1)
-        return max(1, max_working_bytes // per_row)
+        """Max ``(i, j)`` pairs per correlation-matrix tile within scratch RAM."""
+        per_pair = max(n_frames * 8 * n_temp_arrays, 1)
+        return max(1, max_working_bytes // per_pair)
+
+    @staticmethod
+    def _corr_matrix_tiles(
+        n_elements: int,
+        budget_pairs: int,
+    ) -> list[tuple[int, int, int, int]]:
+        """Upper-triangle tile bounds ``(i0, i1, j0, j1)`` for one corr build."""
+        tiles: list[tuple[int, int, int, int]] = []
+        i0 = 0
+        while i0 < n_elements:
+            rem_cols = n_elements - i0
+            rem_rows = n_elements - i0
+            ideal_row = budget_pairs / rem_cols
+            if ideal_row >= 1.0:
+                row_size = max(1, min(rem_rows, int(ideal_row)))
+                tiles.append((i0, i0 + row_size, i0, n_elements))
+                i0 += row_size
+            else:
+                col_size = max(1, min(rem_cols, int(budget_pairs)))
+                j0 = i0
+                while j0 < n_elements:
+                    tiles.append((i0, i0 + 1, j0, min(j0 + col_size, n_elements)))
+                    j0 += col_size
+                i0 += 1
+        return tiles
 
     def _symmetrize_corr_matrix(
         self, corr_matrix: np.ndarray, n_elements: int
     ) -> None:
         i_upper, j_upper = np.triu_indices(n_elements, k=1)
         corr_matrix[:, j_upper, i_upper] = corr_matrix[:, i_upper, j_upper]
+
+    def _fill_corr_matrix_tile(
+        self,
+        tile: tuple[int, int, int, int],
+        velocities: np.ndarray,
+        corr_matrix: np.ndarray,
+        win_time: np.ndarray,
+        n_corr: int,
+        n_frames: int,
+    ) -> None:
+        """Fill one upper-triangle tile of ``corr_matrix``."""
+        i0, i1, j0, j1 = tile
+        row_vel = velocities[i0:i1]
+        col_vel = velocities[j0:j1]
+        cross_freq = np.real(
+            row_vel[:, None, :] * np.conj(col_vel[None, :, :])
+        )
+        tmp_time = np.real(irfft(cross_freq, n=n_frames, axis=-1))
+        windowed = self._window_time_batch(
+            tmp_time,
+            n_corr,
+            n_frames,
+            win_time,
+            self.lag_symmetrization,
+        )
+        # windowed is real with length 2*n_corr-1, so rfft yields n_corr bins.
+        spectra = np.real(rfft(windowed, axis=-1))
+        corr_matrix[:, i0:i1, j0:j1] = np.moveaxis(spectra, -1, 0)
 
     def _build_corr_matrix(
         self,
@@ -244,29 +297,24 @@ class FRESEAN(AnalysisBase):
         n_frames: int,
         n_elements: int,
     ) -> None:
-        """Build the velocity cross-correlation matrix (vectorized)."""
-        row_batch = self._corr_matrix_block_size(n_elements, n_frames)
-        for i0 in range(0, n_elements, row_batch):
-            i1 = min(i0 + row_batch, n_elements)
-            row_vel = velocities[i0:i1]
-            n_cols_remaining = n_elements - i0
-            col_batch = self._corr_matrix_block_size(n_cols_remaining, n_frames)
-            for j0 in range(i0, n_elements, col_batch):
-                j1 = min(j0 + col_batch, n_elements)
-                col_vel = velocities[j0:j1]
-                cross_freq = np.real(
-                    row_vel[:, None, :] * np.conj(col_vel[None, :, :])
-                )
-                tmp_time = np.real(ifft(cross_freq, axis=-1))
-                windowed = self._window_time_batch(
-                    tmp_time,
-                    n_corr,
-                    n_frames,
-                    win_time,
-                    self.lag_symmetrization,
-                )
-                spectra = np.real(fft(windowed, axis=-1)[..., :n_corr])
-                corr_matrix[:, i0:i1, j0:j1] = np.moveaxis(spectra, -1, 0)
+        """Build the velocity cross-correlation matrix (vectorized tiles)."""
+        budget_pairs = self._corr_matrix_budget_pairs(n_frames)
+        tiles = self._corr_matrix_tiles(n_elements, budget_pairs)
+        fill_tile = partial(
+            self._fill_corr_matrix_tile,
+            velocities=velocities,
+            corr_matrix=corr_matrix,
+            win_time=win_time,
+            n_corr=n_corr,
+            n_frames=n_frames,
+        )
+        max_workers = self._resolve_n_jobs(self.n_jobs)
+        if max_workers == 1:
+            for tile in tiles:
+                fill_tile(tile)
+        else:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                list(executor.map(fill_tile, tiles))
         self._symmetrize_corr_matrix(corr_matrix, n_elements)
 
     def _fill_eigen_at_frequency(
@@ -334,7 +382,7 @@ class FRESEAN(AnalysisBase):
         n_elements = self._n_elements
         self.results = Results(
             velocities=np.zeros(
-                (n_elements, self.n_frames), dtype=np.complex128
+                (n_elements, self.n_frames), dtype=np.float64
             ),
             corr_matrix=np.empty((self.n_corr, n_elements, n_elements)),
             freqs=freqs,
@@ -373,7 +421,7 @@ class FRESEAN(AnalysisBase):
         if timings is not None:
             t_corr = time.perf_counter()
 
-        velocities = fft(self.results.velocities, axis=1)
+        velocities = rfft(self.results.velocities, axis=1)
         corr_matrix = self.results.corr_matrix
         win_time = self.results.win_time
 
