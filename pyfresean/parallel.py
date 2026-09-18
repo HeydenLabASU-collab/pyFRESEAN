@@ -7,6 +7,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Iterator, Mapping, Optional
 
+import threadpoolctl
+
 FRESEAN_PHASES = ("velocity_fft", "corr_matrix", "eigen")
 
 BLAS_THREAD_ENV_VARS = (
@@ -35,11 +37,18 @@ def set_blas_threads(omp_threads: int) -> None:
 
 @contextmanager
 def blas_thread_context(omp_threads: int) -> Iterator[None]:
-    """Temporarily set BLAS thread env vars, then restore previous values."""
+    """Temporarily limit BLAS/OpenMP threads for one :meth:`~pyfresean.FRESEAN._conclude` phase.
+
+    Env vars are updated for libraries that read them at import time. ``threadpoolctl``
+    applies runtime limits so thread counts can change safely between phases (e.g. corr
+    thread pool at ``omp_threads=1`` followed by eigen at ``omp_threads=N``).
+    """
+    n = max(1, int(omp_threads))
     saved = {var: os.environ.get(var) for var in BLAS_THREAD_ENV_VARS}
-    set_blas_threads(omp_threads)
+    set_blas_threads(n)
     try:
-        yield
+        with threadpoolctl.threadpool_limits(limits=n):
+            yield
     finally:
         for var, value in saved.items():
             if value is None:

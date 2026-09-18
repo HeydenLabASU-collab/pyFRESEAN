@@ -23,6 +23,7 @@ dependencies = [
     "MDAnalysis>=2.0.0",
     "numpy>=1.23.0",
     "scipy>=1.9.0",
+    "threadpoolctl>=3.1.0",
 ]
 keywords = [
     "molecular simulations",
