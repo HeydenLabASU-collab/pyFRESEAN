@@ -6,7 +6,7 @@ from pyfresean.benchmark_keys import (
     BENCH_T_CORR_MATRIX,
     BENCH_T_EIGEN,
     BENCH_T_SPECTRAL,
-    BENCH_T_VELOCITY_MATRIX,
+    BENCH_T_VELOCITY_SPECTRA,
 )
 from pyfresean.transformations import Align, Unwrap
 from pyfresean.tests.utils import make_Universe
@@ -64,8 +64,86 @@ class TestFRESEAN:
         )
         assert analysis.results.corr_matrix.shape == (4, n_elements, n_elements)
         assert analysis.results.freqs.shape == (4,)
+        assert analysis.results.corr_freqs.shape == (4,)
         assert analysis.results.vdos_total.shape == (4,)
         assert analysis.n_frames == 16
+
+    def test_vdos_only_skips_modes(self, universe):
+        full = FRESEAN(universe, n_corr=4)
+        vdos_only = FRESEAN(universe, n_corr=4)
+        full.run()
+        vdos_only.run(compute_modes=False)
+        assert vdos_only.results.eigenvalues is None
+        assert vdos_only.results.eigenvectors is None
+        assert vdos_only.results.mode_freqs is None
+        np.testing.assert_allclose(
+            vdos_only.results.vdos_total,
+            full.results.vdos_total,
+            rtol=1e-12,
+            atol=1e-12,
+        )
+
+    def test_compute_flags_cannot_both_be_false(self, universe):
+        analysis = FRESEAN(universe, n_corr=4)
+        with pytest.raises(ValueError, match="compute_modes"):
+            analysis.run(compute_modes=False, compute_vdos=False)
+
+    def test_mode_freq_subset(self, universe):
+        analysis = FRESEAN(universe, n_corr=4, dt=0.004)
+        target = float(analysis._frequency_grid(4, 0.004)[2])
+        subset = FRESEAN(universe, n_corr=4, dt=0.004)
+        full = FRESEAN(universe, n_corr=4, dt=0.004)
+        full.run()
+        subset.run(compute_modes=[target], compute_vdos=[target])
+        n_elements = universe.atoms.n_atoms * 3
+        assert subset.results.corr_matrix.shape == (4, n_elements, n_elements)
+        assert subset.results.eigenvalues.shape == (1, n_elements)
+        assert subset.results.vdos_total.shape == (1,)
+        np.testing.assert_allclose(
+            subset.results.corr_matrix[2],
+            full.results.corr_matrix[2],
+            rtol=0,
+            atol=0,
+        )
+        np.testing.assert_allclose(
+            subset.results.eigenvalues[0],
+            full.results.eigenvalues[2],
+            rtol=1e-12,
+            atol=1e-12,
+        )
+
+    def test_empty_frequency_list_raises(self, universe):
+        analysis = FRESEAN(universe, n_corr=4)
+        with pytest.raises(ValueError, match="empty"):
+            analysis.run(compute_vdos=[])
+
+    def test_reuse_corr_matrix_for_modes_after_vdos(self, universe):
+        analysis = FRESEAN(universe, n_corr=4)
+        analysis.run(compute_modes=False)
+        assert analysis.results.eigenvalues is None
+        analysis.run(compute_modes=True, read_traj=False)
+        n_elements = universe.atoms.n_atoms * 3
+        assert analysis.results.eigenvalues.shape == (4, n_elements)
+
+    def test_modes_from_velocity_cache(self, universe):
+        analysis = FRESEAN(universe, n_corr=4)
+        analysis.run(compute_modes=False)
+        analysis.results.corr_matrix = None
+        analysis.run(compute_modes=True, compute_vdos=False, read_traj=False)
+        n_elements = universe.atoms.n_atoms * 3
+        assert analysis.results.eigenvalues.shape == (4, n_elements)
+
+    def test_vdos_freqs_nearest_grid_bin(self, universe):
+        grid = FRESEAN._frequency_grid(4, 0.004)
+        between = float((grid[1] + grid[2]) / 2.0)
+        analysis = FRESEAN(
+            universe,
+            n_corr=4,
+            dt=0.004,
+        )
+        analysis.run(compute_modes=False, compute_vdos=[between])
+        assert analysis.results.vdos_freqs.shape == (1,)
+        assert analysis.results.vdos_freqs[0] in grid
 
     def test_vdos_is_finite(self, universe):
         analysis = FRESEAN(universe, n_corr=4)
@@ -222,21 +300,21 @@ class TestFRESEAN:
         timings = analysis.run(benchmark=True)
 
         assert set(timings) == {
-            BENCH_T_VELOCITY_MATRIX,
+            BENCH_T_VELOCITY_SPECTRA,
             BENCH_T_CORR_MATRIX,
             BENCH_T_EIGEN,
             BENCH_T_SPECTRAL,
         }
         assert analysis.benchmark == timings
         for key in (
-            BENCH_T_VELOCITY_MATRIX,
+            BENCH_T_VELOCITY_SPECTRA,
             BENCH_T_CORR_MATRIX,
             BENCH_T_EIGEN,
             BENCH_T_SPECTRAL,
         ):
             assert timings[key] >= 0.0
         assert timings[BENCH_T_SPECTRAL] == pytest.approx(
-            timings[BENCH_T_VELOCITY_MATRIX]
+            timings[BENCH_T_VELOCITY_SPECTRA]
             + timings[BENCH_T_CORR_MATRIX]
             + timings[BENCH_T_EIGEN]
         )

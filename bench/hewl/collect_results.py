@@ -23,7 +23,7 @@ from pyfresean.benchmark_keys import (
     BENCH_T_PY_TOTAL,
     BENCH_T_SPECTRAL,
     BENCH_T_TOTAL,
-    BENCH_T_VELOCITY_MATRIX,
+    BENCH_T_VELOCITY_SPECTRA,
     BENCH_T_WRITE_OUTPUTS,
 )
 
@@ -551,7 +551,11 @@ def plot_case_breakdown(
     fig, ax = plt.subplots(figsize=(8, 4.5))
     ax.plot(
         ncpus,
-        [nested_bench(r, "py_fresean", BENCH_T_VELOCITY_MATRIX) for r in rows],
+        [
+            nested_bench(r, "py_fresean", BENCH_T_VELOCITY_SPECTRA)
+            or nested_bench(r, "py_fresean", "bench_t_velocity_matrix")
+            for r in rows
+        ],
         "o-",
         label="velocity matrix",
     )
