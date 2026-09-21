@@ -106,12 +106,10 @@ examples/output_data/*
 !examples/output_data/README.md
 
 # Example trajectory inputs (see examples/input_data/README.md)
+examples/input_data/MD-HEWL-303K/input_data/output/
+examples/input_data/**/output/
 examples/input_data/**/*.trr
 examples/input_data/**/*.tpr
-examples/input_data/MD-water-300K/
-examples/input_data/MD-gas-50K/
-examples/input_data/MD-gas-300K/
-examples/input_data/MD-gas-300K-CG/
 
 # mypy
 .mypy_cache/
