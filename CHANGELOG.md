@@ -22,6 +22,13 @@ The rules for this file:
 - @amruthesht
 
 ### Added
+- :meth:`FRESEAN.run` options ``read_traj``, ``compute_vdos``, and
+  ``compute_modes`` (each ``True``, ``False``, or a frequency list with
+  nearest-bin mapping; defaults ``True``). ``read_traj=False`` reuses
+  ``results.velocity_spectra`` / ``results.corr_matrix`` when
+  ``results.fresean_frame_key`` matches frame selection and
+  ``(n_corr, dt, sigma)``. Reusable intermediates available in 
+  :attr:`~MDAnalysis.analysis.base.Results`. (PR #7)
 - Per-phase parallelism for ``FRESEAN`` via a ``parallel`` dict
   (``velocity_fft``, ``corr_matrix``, ``eigen``), each with ``n_jobs`` and
   ``omp_threads``; ``pyfresean.parallel`` helpers and runtime BLAS limits
@@ -89,6 +96,10 @@ The rules for this file:
 <!-- Bug fixes -->
 
 ### Changed
+- FRESEAN benchmark phase ``bench_t_velocity_matrix`` renamed to
+  ``bench_t_velocity_spectra`` (trajectory read plus velocity FFT);
+  ``bench_t_corr_matrix`` covers correlation build, normalization, and VDOS.
+  Legacy key kept as an alias in ``benchmark_keys.py``. (PR #7)
 - ``FRESEAN`` correlation-matrix construction uses vectorized tiles and
   per-phase ``blas_thread_context`` instead of a single global ``n_jobs``.
   (PR #6)
