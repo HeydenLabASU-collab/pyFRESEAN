@@ -17,14 +17,17 @@ CG_BENCHMARK_KEYS = (
     BENCH_T_TOTAL,
 )
 
-# FRESEAN phases
-BENCH_T_VELOCITY_MATRIX = "bench_t_velocity_matrix"
+# FRESEAN phases (aligned with read_traj → velocity_spectra, compute_vdos,
+# compute_modes)
+BENCH_T_VELOCITY_SPECTRA = "bench_t_velocity_spectra"
 BENCH_T_CORR_MATRIX = "bench_t_corr_matrix"
 BENCH_T_EIGEN = "bench_t_eigen"
 BENCH_T_SPECTRAL = "bench_t_spectral"
+# Legacy JSON from before rename
+BENCH_T_VELOCITY_MATRIX = BENCH_T_VELOCITY_SPECTRA
 
 FRESEAN_BENCHMARK_KEYS = (
-    BENCH_T_VELOCITY_MATRIX,
+    BENCH_T_VELOCITY_SPECTRA,
     BENCH_T_CORR_MATRIX,
     BENCH_T_EIGEN,
     BENCH_T_SPECTRAL,
@@ -61,7 +64,7 @@ def finalize_cg_benchmark(timings: dict[str, float]) -> dict[str, float]:
 
 def finalize_fresean_benchmark(timings: dict[str, float]) -> dict[str, float]:
     timings[BENCH_T_SPECTRAL] = (
-        timings[BENCH_T_VELOCITY_MATRIX]
+        timings[BENCH_T_VELOCITY_SPECTRA]
         + timings[BENCH_T_CORR_MATRIX]
         + timings[BENCH_T_EIGEN]
     )
