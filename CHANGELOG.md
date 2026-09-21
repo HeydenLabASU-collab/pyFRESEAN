@@ -22,6 +22,13 @@ The rules for this file:
 - @amruthesht
 
 ### Added
+- Example notebooks ``01_AA-alanine-dipeptide-gas-300K`` (all-atom gas
+  FRESEAN) and ``02_AA_CG-hewl-solution-300K`` (AA vs CG HEWL), including
+  :meth:`FRESEAN.run` ``read_traj``, ``compute_vdos``, and ``compute_modes``.
+  (PR #8)
+- GROMACS HEWL solution inputs under ``examples/input_data/MD-HEWL-303K/``
+  (topology, MDP, SLURM ``run-slurm.sh``, ``postprocess-prot.sh``).
+  (PR #8)
 - :meth:`FRESEAN.run` options ``read_traj``, ``compute_vdos``, and
   ``compute_modes`` (each ``True``, ``False``, or a frequency list with
   nearest-bin mapping; defaults ``True``). ``read_traj=False`` reuses
@@ -96,6 +103,8 @@ The rules for this file:
 <!-- Bug fixes -->
 
 ### Changed
+- Examples revamp: two focused notebooks replace the older MD/CG tutorial
+  set; ``examples/README.md`` and ``input_data/`` layout updated. (PR #8)
 - FRESEAN benchmark phase ``bench_t_velocity_matrix`` renamed to
   ``bench_t_velocity_spectra`` (trajectory read plus velocity FFT);
   ``bench_t_corr_matrix`` covers correlation build, normalization, and VDOS.
@@ -118,6 +127,8 @@ The rules for this file:
 <!-- Soon-to-be removed features -->
 
 ### Removed
+- Legacy example notebooks (``01_MD-*`` through ``05_CG-hewl``) and
+  ``examples/fresean_metaD_data/``. (PR #8)
 - ``FRESEAN`` top-level ``n_jobs`` and legacy ``build_phase_parallelism``
   ``n_jobs`` shorthand; use ``parallel`` instead. (PR #6)
 - HEWL benchmark ``all`` mode, mode aliases (``cg`` / ``py`` / ``c``),
