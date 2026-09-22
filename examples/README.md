@@ -1,12 +1,12 @@
 # PyFRESEAN examples
 
-Two minimal notebooks for FRESEAN analysis with the `pyfresean` package.
+Three example notebooks for FRESEAN analysis with the `pyfresean` package.
 
 | Notebook | System | What it covers |
 |---|---|---|
 | `01_AA-alanine-dipeptide-gas-300K.ipynb` | Alanine dipeptide, all-atom, gas, 300 K | Align, FRESEAN, total VDoS, per-mode VDoS (modes 1 & 2) |
 | `02_AA_CG-hewl-solution-300K.ipynb` | HEWL, all-atom + coarse-grained, solution, 300 K | CG mapping, FRESEAN on AA and CG, total VDoS overlay, per-mode VDoS (modes 7 & 8) |
-| `03_CG-hewl-fresean-parallel-benchmark.ipynb` | HEWL, CG only, solution, 300 K | CPU report, serial vs per-phase `parallel=` settings, timings (`timeit`) and summary table |
+| `03_CG-hewl-fresean-parallel-benchmark.ipynb` | HEWL, CG only, solution, 300 K | CPU detection, serial vs per-phase `parallel=` settings, `benchmark=True` timings, and summary table |
 
 Run notebooks from the `examples/` directory so `input_data/` and `output_data/` resolve correctly.
 
