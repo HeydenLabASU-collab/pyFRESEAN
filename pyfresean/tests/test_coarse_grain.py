@@ -563,7 +563,7 @@ def test_build_universe_benchmark_records_phase_timings():
         BENCH_T_ASSEMBLE_UNIVERSE,
         BENCH_T_FRAME_PROCESSING,
         BENCH_T_MAPPING,
-        BENCH_T_TOTAL,
+        BENCH_T_CG_TOTAL,
         BENCH_T_WRITE_OUTPUTS,
     )
 
@@ -573,13 +573,13 @@ def test_build_universe_benchmark_records_phase_timings():
         BENCH_T_FRAME_PROCESSING,
         BENCH_T_WRITE_OUTPUTS,
         BENCH_T_ASSEMBLE_UNIVERSE,
-        BENCH_T_TOTAL,
+        BENCH_T_CG_TOTAL,
     }
     for key in timings:
         assert timings[key] >= 0.0
     assert timings[BENCH_T_MAPPING] > 0.0
     assert timings[BENCH_T_FRAME_PROCESSING] > 0.0
-    assert timings[BENCH_T_TOTAL] == pytest.approx(
+    assert timings[BENCH_T_CG_TOTAL] == pytest.approx(
         timings[BENCH_T_MAPPING]
         + timings[BENCH_T_FRAME_PROCESSING]
         + timings[BENCH_T_WRITE_OUTPUTS]

@@ -15,14 +15,16 @@ from pyfresean.benchmark_keys import (
     BENCH_T_C_EIGEN,
     BENCH_T_C_TOTAL,
     BENCH_T_CORR_MATRIX,
+    BENCH_T_VDOS,
     BENCH_T_EIGEN,
     BENCH_T_FRAME_PROCESSING,
     BENCH_T_MAPPING,
     BENCH_T_PY_COARSE,
     BENCH_T_PY_FRESEAN,
     BENCH_T_PY_TOTAL,
-    BENCH_T_SPECTRAL,
-    BENCH_T_TOTAL,
+    BENCH_T_CG_TOTAL,
+    BENCH_T_FRESEAN_TOTAL,
+    BENCH_T_READ_TRAJ,
     BENCH_T_VELOCITY_SPECTRA,
     BENCH_T_WRITE_OUTPUTS,
 )
@@ -62,15 +64,6 @@ CASE_ORDER = (
     "omp_n_njobs_1_vec_old",
 )
 
-LEGACY_BENCH_KEYS = {
-    BENCH_T_PY_FRESEAN: "py_fresean_s",
-    BENCH_T_PY_COARSE: "py_coarse_s",
-    BENCH_T_PY_TOTAL: "py_total_s",
-    BENCH_T_C_COVAR: "c_covar_s",
-    BENCH_T_C_EIGEN: "c_eigen_s",
-    BENCH_T_C_TOTAL: "c_total_s",
-}
-
 
 def results_root(system: str) -> Path:
     return RESULTS_ROOT / f"results_{system}"
@@ -93,9 +86,6 @@ def bench_value(row: dict | None, key: str) -> float:
         return 0.0
     if key in row and row[key] is not None:
         return float(row[key])
-    legacy = LEGACY_BENCH_KEYS.get(key)
-    if legacy and legacy in row and row[legacy] is not None:
-        return float(row[legacy])
     return 0.0
 
 
@@ -117,9 +107,23 @@ def load_results(results_dir: Path) -> list[dict]:
     return rows
 
 
+def py_fresean_velocity_matrix_time(row: dict) -> float:
+    """Trajectory read + velocity FFT (plotted as one phase)."""
+    return nested_bench(row, "py_fresean", BENCH_T_READ_TRAJ) + nested_bench(
+        row, "py_fresean", BENCH_T_VELOCITY_SPECTRA
+    )
+
+
+def py_fresean_eigen_phase_time(row: dict) -> float:
+    """VDOS normalization + mode diagonalization (plotted as one phase)."""
+    return nested_bench(row, "py_fresean", BENCH_T_VDOS) + nested_bench(
+        row, "py_fresean", BENCH_T_EIGEN
+    )
+
+
 def py_fresean_time(row: dict) -> float:
     return bench_value(row, BENCH_T_PY_FRESEAN) or nested_bench(
-        row, "py_fresean", BENCH_T_SPECTRAL
+        row, "py_fresean", BENCH_T_FRESEAN_TOTAL
     )
 
 
@@ -188,7 +192,9 @@ def discover_cases(py_cases_dir: Path) -> list[str]:
         and p.name not in CASE_LABELS
         and any(p.glob("ncpus_*/result.json"))
     )
-    return sorted(known + extra, key=lambda name: order.get(name, len(CASE_ORDER)))
+    return sorted(
+        known + extra, key=lambda name: order.get(name, len(CASE_ORDER))
+    )
 
 
 def _plot_metric_overview(
@@ -224,7 +230,12 @@ def _plot_metric_overview(
         ]
         ax.plot(ncpus, values, "o-", label=CASE_LABELS.get(case, case))
 
-    if ncpus_ref and c_map and c_baseline is not None and c_metric_fn is not None:
+    if (
+        ncpus_ref
+        and c_map
+        and c_baseline is not None
+        and c_metric_fn is not None
+    ):
         c_ncpus = [n for n in ncpus_ref if n in c_map]
         if c_ncpus:
             ax.plot(
@@ -317,8 +328,12 @@ def plot_inverse_walltime_overview(
         system=system,
         title=f"HEWL {system.upper()} throughput — 1 / wall time",
         ylabel=r"$1 / T_N$ (s$^{-1}$)",
-        metric_fn=lambda _baseline, _ncpus, walltime: _inverse_walltime(walltime),
-        c_metric_fn=lambda _baseline, _ncpus, walltime: _inverse_walltime(walltime),
+        metric_fn=lambda _baseline, _ncpus, walltime: _inverse_walltime(
+            walltime
+        ),
+        c_metric_fn=lambda _baseline, _ncpus, walltime: _inverse_walltime(
+            walltime
+        ),
     )
 
 
@@ -336,8 +351,12 @@ def plot_speedup_overview(
         system=system,
         title=f"HEWL {system.upper()} speedup — single-core time / wall time",
         ylabel=r"$T_1 / T_N$",
-        metric_fn=lambda baseline, _ncpus, walltime: _speedup(baseline, walltime),
-        c_metric_fn=lambda baseline, _ncpus, walltime: _speedup(baseline, walltime),
+        metric_fn=lambda baseline, _ncpus, walltime: _speedup(
+            baseline, walltime
+        ),
+        c_metric_fn=lambda baseline, _ncpus, walltime: _speedup(
+            baseline, walltime
+        ),
         reference_line=1.0,
     )
 
@@ -376,7 +395,10 @@ def plot_vectorized_comparison(
     fig, axes = plt.subplots(1, 3, figsize=(14, 4.5))
     metrics = (
         ("wall time (s)", lambda r: py_fresean_time(r)),
-        (r"$1 / T_N$ (s$^{-1}$)", lambda r: _inverse_walltime(py_fresean_time(r))),
+        (
+            r"$1 / T_N$ (s$^{-1}$)",
+            lambda r: _inverse_walltime(py_fresean_time(r)),
+        ),
         (r"$T_1 / T_N$", None),
     )
 
@@ -551,13 +573,9 @@ def plot_case_breakdown(
     fig, ax = plt.subplots(figsize=(8, 4.5))
     ax.plot(
         ncpus,
-        [
-            nested_bench(r, "py_fresean", BENCH_T_VELOCITY_SPECTRA)
-            or nested_bench(r, "py_fresean", "bench_t_velocity_matrix")
-            for r in rows
-        ],
+        [py_fresean_velocity_matrix_time(r) for r in rows],
         "o-",
-        label="velocity matrix",
+        label="velocity matrix (read + FFT)",
     )
     ax.plot(
         ncpus,
@@ -567,9 +585,9 @@ def plot_case_breakdown(
     )
     ax.plot(
         ncpus,
-        [nested_bench(r, "py_fresean", BENCH_T_EIGEN) for r in rows],
-        "d-",
-        label="eigen",
+        [py_fresean_eigen_phase_time(r) for r in rows],
+        "v-",
+        label="vdos + eigen",
     )
     ax.plot(
         ncpus,
@@ -611,7 +629,7 @@ def plot_cg_reference(plot_path: Path) -> None:
     fig, ax = plt.subplots(figsize=(6, 4))
     ax.bar(labels, values, color=["#4c72b0", "#55a868", "#c44e52", "#8172b2"])
     ax.set_ylabel("wall time (s)")
-    ax.set_title(f"py CG reference (bench_t_total={sum(values):.1f}s)")
+    ax.set_title(f"py CG reference (bench_t_cg_total={sum(values):.1f}s)")
     fig.tight_layout()
     plot_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(plot_path, dpi=150)
@@ -720,9 +738,7 @@ def collect_system(
         print(f"Wrote {plots / 'inverse_walltime_all_cases.png'}")
         print(f"Wrote {plots / 'speedup_all_cases.png'}")
         compare_count = sum(
-            1
-            for case in VECTORIZED_COMPARE_CASES
-            if case_rows.get(case)
+            1 for case in VECTORIZED_COMPARE_CASES if case_rows.get(case)
         )
         if compare_count >= 2:
             print(f"Wrote {plots / 'vectorized_corr_comparison.png'}")
