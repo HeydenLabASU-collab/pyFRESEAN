@@ -36,6 +36,10 @@ The rules for this file:
   FRESEAN) and ``02_AA_CG-hewl-solution-300K`` (AA vs CG HEWL), including
   :meth:`FRESEAN.run` ``read_traj``, ``compute_vdos``, and ``compute_modes``.
   (PR #8)
+- Example notebook ``03_CG-hewl-fresean-parallel-benchmark`` (CG HEWL in
+  solution): serial vs per-phase (hybrid) ``parallel``-ism (velocity FFT, correlation
+  matrix, eigen), and a summary table from
+  :meth:`FRESEAN.run` ``benchmark=True`` phase timings.
 - GROMACS HEWL solution inputs under ``examples/input_data/MD-HEWL-303K/``
   (topology, MDP, SLURM ``run-slurm.sh``, ``postprocess-prot.sh``).
   (PR #8)
@@ -113,6 +117,7 @@ The rules for this file:
 <!-- Bug fixes -->
 
 ### Changed
+
 - FRESEAN work for each :meth:`run` is planned in ``_fresean_run_plan``;
   :meth:`_conclude` and ``benchmark=True`` follow plan flags (trajectory
   read, velocity FFT, full or diagonal correlation spectra, normalization,
