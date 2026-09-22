@@ -1234,7 +1234,7 @@ class CoarseGrain:
             If ``True``, record wall times on :attr:`CoarseGrain.benchmark`.
             Keys: ``bench_t_mapping``, ``bench_t_frame_processing``,
             ``bench_t_write_outputs``, ``bench_t_assemble_universe``, and
-            ``bench_t_total``.
+            ``bench_t_cg_total``.
         timings
             Optional timing dict populated when benchmarking. When omitted and
             ``benchmark=True``, a new dict is created on this instance.

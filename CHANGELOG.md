@@ -22,6 +22,16 @@ The rules for this file:
 - @amruthesht
 
 ### Added
+- :meth:`FRESEAN.run` ``compute_corr_matrix`` flag (default ``True``). With
+  ``compute_vdos=True`` and ``compute_corr_matrix=False``, total VDOS is
+  built from batched diagonal autocorrelation spectra (same lag/window
+  pipeline, ``corr_matrix`` phase parallelism) without storing the full
+  ``(n_corr, n, n)`` matrix.   ``compute_modes`` requires ``compute_corr_matrix=True``. (PR #10)
+- FRESEAN ``benchmark=True`` phase keys ``bench_t_read_traj``,
+  ``bench_t_velocity_spectra``, ``bench_t_corr_matrix`` (full or diagonal
+  spectral build only), ``bench_t_vdos`` (temperature / ``vdos_norm``
+  normalization after a build, plus ``vdos_total`` when VDOS is enabled),
+  and ``bench_t_eigen``; ``bench_t_fresean_total`` sums those five. (PR #10)
 - Example notebooks ``01_AA-alanine-dipeptide-gas-300K`` (all-atom gas
   FRESEAN) and ``02_AA_CG-hewl-solution-300K`` (AA vs CG HEWL), including
   :meth:`FRESEAN.run` ``read_traj``, ``compute_vdos``, and ``compute_modes``.
@@ -34,7 +44,7 @@ The rules for this file:
   nearest-bin mapping; defaults ``True``). ``read_traj=False`` reuses
   ``results.velocity_spectra`` / ``results.corr_matrix`` when
   ``results.fresean_frame_key`` matches frame selection and
-  ``(n_corr, dt, sigma)``. Reusable intermediates available in 
+  ``(n_corr, dt, sigma)``. Reusable intermediates available in
   :attr:`~MDAnalysis.analysis.base.Results`. (PR #7)
 - Per-phase parallelism for ``FRESEAN`` via a ``parallel`` dict
   (``velocity_fft``, ``corr_matrix``, ``eigen``), each with ``n_jobs`` and
@@ -103,12 +113,28 @@ The rules for this file:
 <!-- Bug fixes -->
 
 ### Changed
+- FRESEAN work for each :meth:`run` is planned in ``_fresean_run_plan``;
+  :meth:`_conclude` and ``benchmark=True`` follow plan flags (trajectory
+  read, velocity FFT, full or diagonal correlation spectra, normalization,
+  VDOS, modes). Run options are arguments to the planner from
+  :meth:`FRESEAN.run`. (PR #10)
+- Normalization (and ``vdos_total`` when requested) always runs after a
+  fresh full or diagonal spectral build; ``vdos_total`` uses the same
+  pre-normalization trace as the temperature / ``vdos_norm`` step. Wall
+  time for that step is recorded under ``bench_t_vdos``, not
+  ``bench_t_corr_matrix``. (PR #10)
+- Repeated ``benchmark=True`` runs on one ``FRESEAN`` instance keep wall
+  times for phases skipped by the plan (e.g. ``read_traj=False``); phases
+  that run again are reset before timing. (PR #10)
+- Benchmark total keys are ``bench_t_cg_total`` (CoarseGrain) and
+  ``bench_t_fresean_total`` (FRESEAN). (PR #10)
+- HEWL ``collect_results`` FRESEAN breakdown plots aggregate the five
+  internal ``bench_t_*`` timings to three curves only: velocity matrix
+  (``bench_t_read_traj`` + ``bench_t_velocity_spectra``), corr + norm/VDOS
+  (``bench_t_corr_matrix`` + ``bench_t_vdos``), and eigen
+  (``bench_t_eigen``). (PR #10)
 - Examples revamp: two focused notebooks replace the older MD/CG tutorial
   set; ``examples/README.md`` and ``input_data/`` layout updated. (PR #8)
-- FRESEAN benchmark phase ``bench_t_velocity_matrix`` renamed to
-  ``bench_t_velocity_spectra`` (trajectory read plus velocity FFT);
-  ``bench_t_corr_matrix`` covers correlation build, normalization, and VDOS.
-  Legacy key kept as an alias in ``benchmark_keys.py``. (PR #7)
 - ``FRESEAN`` correlation-matrix construction uses vectorized tiles and
   per-phase ``blas_thread_context`` instead of a single global ``n_jobs``.
   (PR #6)
@@ -127,6 +153,9 @@ The rules for this file:
 <!-- Soon-to-be removed features -->
 
 ### Removed
+- Legacy benchmark key names ``bench_t_spectral``, ``bench_t_total``, and
+  ``bench_t_velocity_matrix`` (no aliases in ``benchmark_keys`` or HEWL
+  collectors). (PR #10)
 - Legacy example notebooks (``01_MD-*`` through ``05_CG-hewl``) and
   ``examples/fresean_metaD_data/``. (PR #8)
 - ``FRESEAN`` top-level ``n_jobs`` and legacy ``build_phase_parallelism``

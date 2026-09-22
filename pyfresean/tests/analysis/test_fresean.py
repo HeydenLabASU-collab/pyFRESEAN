@@ -4,9 +4,13 @@ import numpy as np
 from pyfresean.analysis.fresean import FRESEAN
 from pyfresean.benchmark_keys import (
     BENCH_T_CORR_MATRIX,
+    BENCH_T_VDOS,
     BENCH_T_EIGEN,
-    BENCH_T_SPECTRAL,
+    BENCH_T_FRESEAN_TOTAL,
+    BENCH_T_READ_TRAJ,
     BENCH_T_VELOCITY_SPECTRA,
+    finalize_fresean_benchmark,
+    new_fresean_benchmark_timings,
 )
 from pyfresean.transformations import Align, Unwrap
 from pyfresean.tests.utils import make_Universe
@@ -87,6 +91,113 @@ class TestFRESEAN:
         analysis = FRESEAN(universe, n_corr=4)
         with pytest.raises(ValueError, match="compute_modes"):
             analysis.run(compute_modes=False, compute_vdos=False)
+
+    def test_modes_require_full_corr_matrix(self, universe):
+        analysis = FRESEAN(universe, n_corr=4)
+        with pytest.raises(ValueError, match="compute_corr_matrix"):
+            analysis.run(compute_modes=True, compute_corr_matrix=False)
+
+    def test_vdos_preserved_when_corr_only_second_run(self, universe):
+        analysis = FRESEAN(universe, n_corr=4)
+        analysis.run(
+            compute_modes=False,
+            compute_corr_matrix=False,
+        )
+        vdos_ref = analysis.results.vdos_total.copy()
+        analysis.run(
+            compute_modes=True,
+            compute_vdos=False,
+            compute_corr_matrix=True,
+            read_traj=False,
+        )
+        np.testing.assert_allclose(
+            analysis.results.vdos_total, vdos_ref, rtol=0, atol=0
+        )
+        assert analysis.results.eigenvalues is not None
+
+    def test_modes_without_vdos_still_times_norm_in_vdos_phase(self, universe):
+        analysis = FRESEAN(universe, n_corr=4)
+        timings = analysis.run(
+            compute_modes=True,
+            compute_vdos=False,
+            benchmark=True,
+        )
+        assert timings[BENCH_T_CORR_MATRIX] > 0.0
+        assert timings[BENCH_T_VDOS] > 0.0
+
+    def test_benchmark_keeps_skipped_phases_on_read_traj_false(self, universe):
+        analysis = FRESEAN(universe, n_corr=4)
+        first = analysis.run(
+            compute_modes=False,
+            compute_corr_matrix=False,
+            benchmark=True,
+        )
+        assert first[BENCH_T_VELOCITY_SPECTRA] > 0.0
+        assert first[BENCH_T_VDOS] > 0.0
+        assert first[BENCH_T_EIGEN] == 0.0
+
+        second = analysis.run(
+            compute_modes=True,
+            compute_vdos=False,
+            compute_corr_matrix=True,
+            read_traj=False,
+            benchmark=True,
+        )
+        assert second[BENCH_T_VELOCITY_SPECTRA] == pytest.approx(
+            first[BENCH_T_VELOCITY_SPECTRA]
+        )
+        assert second[BENCH_T_VDOS] > 0.0
+        assert second[BENCH_T_CORR_MATRIX] > 0.0
+        assert second[BENCH_T_EIGEN] > 0.0
+        assert second[BENCH_T_FRESEAN_TOTAL] == pytest.approx(
+            second[BENCH_T_READ_TRAJ]
+            + second[BENCH_T_VELOCITY_SPECTRA]
+            + second[BENCH_T_CORR_MATRIX]
+            + second[BENCH_T_VDOS]
+            + second[BENCH_T_EIGEN]
+        )
+
+    def test_benchmark_overwrites_rerun_phase_not_skipped(self, universe):
+        analysis = FRESEAN(universe, n_corr=4)
+        analysis.run(compute_modes=False, compute_corr_matrix=False)
+        bogus = new_fresean_benchmark_timings()
+        bogus[BENCH_T_VELOCITY_SPECTRA] = 999.0
+        bogus[BENCH_T_CORR_MATRIX] = 999.0
+        analysis.benchmark = finalize_fresean_benchmark(bogus)
+
+        timings = analysis.run(
+            compute_modes=True,
+            compute_vdos=False,
+            compute_corr_matrix=True,
+            read_traj=False,
+            benchmark=True,
+        )
+        assert timings[BENCH_T_VELOCITY_SPECTRA] == 999.0
+        assert 0.0 < timings[BENCH_T_CORR_MATRIX] < 999.0
+        assert timings[BENCH_T_EIGEN] > 0.0
+
+    def test_vdos_diagonal_path_matches_full_matrix(self, universe):
+        full = FRESEAN(universe, n_corr=4)
+        fast = FRESEAN(universe, n_corr=4)
+        full.run(compute_modes=False, compute_corr_matrix=True)
+        fast.run(
+            compute_modes=False,
+            compute_corr_matrix=False,
+        )
+        assert fast.results.corr_matrix is None
+        assert fast.results.corr_freqs is None
+        np.testing.assert_allclose(
+            fast.results.vdos_total,
+            full.results.vdos_total,
+            rtol=1e-12,
+            atol=1e-12,
+        )
+        np.testing.assert_allclose(
+            fast.results.avg_temperature,
+            full.results.avg_temperature,
+            rtol=1e-12,
+            atol=1e-12,
+        )
 
     def test_mode_freq_subset(self, universe):
         analysis = FRESEAN(universe, n_corr=4, dt=0.004)
@@ -227,9 +338,7 @@ class TestFRESEAN:
                 for j in range(j0, j1):
                     if j >= i:
                         covered.add((i, j))
-        expected = {
-            (i, j) for i in range(5) for j in range(i, 5)
-        }
+        expected = {(i, j) for i in range(5) for j in range(i, 5)}
         assert covered == expected
         assert all(j0 >= i0 for i0, _, j0, _ in tiles)
 
@@ -300,22 +409,30 @@ class TestFRESEAN:
         timings = analysis.run(benchmark=True)
 
         assert set(timings) == {
+            BENCH_T_READ_TRAJ,
             BENCH_T_VELOCITY_SPECTRA,
             BENCH_T_CORR_MATRIX,
+            BENCH_T_VDOS,
             BENCH_T_EIGEN,
-            BENCH_T_SPECTRAL,
+            BENCH_T_FRESEAN_TOTAL,
         }
         assert analysis.benchmark == timings
         for key in (
+            BENCH_T_READ_TRAJ,
             BENCH_T_VELOCITY_SPECTRA,
             BENCH_T_CORR_MATRIX,
+            BENCH_T_VDOS,
             BENCH_T_EIGEN,
-            BENCH_T_SPECTRAL,
+            BENCH_T_FRESEAN_TOTAL,
         ):
             assert timings[key] >= 0.0
-        assert timings[BENCH_T_SPECTRAL] == pytest.approx(
-            timings[BENCH_T_VELOCITY_SPECTRA]
+        assert timings[BENCH_T_VDOS] > 0.0
+        assert timings[BENCH_T_READ_TRAJ] > 0.0
+        assert timings[BENCH_T_FRESEAN_TOTAL] == pytest.approx(
+            timings[BENCH_T_READ_TRAJ]
+            + timings[BENCH_T_VELOCITY_SPECTRA]
             + timings[BENCH_T_CORR_MATRIX]
+            + timings[BENCH_T_VDOS]
             + timings[BENCH_T_EIGEN]
         )
         assert np.all(np.isfinite(analysis.results.vdos_total))

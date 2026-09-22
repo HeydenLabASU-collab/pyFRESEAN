@@ -11,8 +11,17 @@ from __future__ import annotations
 import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from functools import partial
-from typing import TYPE_CHECKING, Any, Literal, Mapping, Optional, Sequence, Union
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Literal,
+    Mapping,
+    Optional,
+    Sequence,
+    Union,
+)
 
 import numpy as np
 from MDAnalysis.analysis.backends import BackendBase, BackendSerial
@@ -26,8 +35,11 @@ from scipy.fft import ifft, irfft, rfft
 from pyfresean.benchmark_keys import (
     BENCH_T_CORR_MATRIX,
     BENCH_T_EIGEN,
+    BENCH_T_READ_TRAJ,
+    BENCH_T_VDOS,
     BENCH_T_VELOCITY_SPECTRA,
     finalize_fresean_benchmark,
+    new_fresean_benchmark_timings,
 )
 from pyfresean.parallel import (
     PhaseParallelism,
@@ -41,6 +53,18 @@ if TYPE_CHECKING:
     from MDAnalysis.core.universe import Universe
 
 ComputeOption = Union[bool, Sequence[float]]
+
+
+@dataclass(frozen=True)
+class _FreseanRunPlan:
+    """Internal work list for one :meth:`FRESEAN.run` (from :meth:`_fresean_run_plan`)."""
+
+    calc_read_traj: Optional[bool]
+    calc_velocity_fft: Optional[bool]
+    calc_vdos: Optional[bool]
+    calc_full_corr_matrix: bool
+    calc_autocorr_diagonal: Optional[bool]
+    calc_modes: bool
 
 
 class FRESEAN(AnalysisBase):
@@ -89,9 +113,11 @@ class FRESEAN(AnalysisBase):
                 "eigen": {"n_jobs": 1, "omp_threads": 8},
             }
     Spectral outputs are configured per :meth:`run` (not at construction).
-    See :meth:`run` for ``read_traj``, ``compute_vdos``, and ``compute_modes``.
+    See :meth:`run` for ``read_traj``, ``compute_vdos``, ``compute_corr_matrix``,
+    and ``compute_modes``.
 
-    run(..., read_traj=True, compute_vdos=True, compute_modes=True, ...)
+    run(..., read_traj=True, compute_vdos=True, compute_corr_matrix=True,
+        compute_modes=True, ...)
         Pipeline: trajectory (optional) → velocity FFT → normalized
         correlation matrix → VDOS and/or modes. Enabling ``compute_vdos``
         builds the correlation matrix and fills ``results.vdos_total``.
@@ -143,11 +169,6 @@ class FRESEAN(AnalysisBase):
         :meth:`FRESEAN.run`
     """
 
-    # **NOTE**: Add instruction to run parallel
-    # export OMP_NUM_THREADS=4
-    # taskset -c 0-3 python3 test_fresean.py (=2)
-    # python3 test_fresean.py (=2)
-
     _analysis_algorithm_is_parallelizable = True
 
     @classmethod
@@ -158,8 +179,123 @@ class FRESEAN(AnalysisBase):
     def _take_first_result(values):
         return values[0]
 
-    def _needs_corr_matrix(self) -> bool:
-        return bool(self.compute_vdos or self.compute_modes)
+    def _fresean_cache_check(
+        self,
+        frame_key: tuple[Any, ...],
+        n_axes: int,
+        corr_shape: tuple[int, int, int],
+    ) -> tuple[bool, bool, bool, bool]:
+        """Whether prior :attr:`results` on this instance can be reused for ``frame_key``.
+
+        Inspects ``self.results`` only (not worker merge / :meth:`_get_aggregator`).
+        """
+        res = getattr(self, "results", None)
+        frame_ok = (
+            res is not None
+            and getattr(res, "fresean_frame_key", None) == frame_key
+        )
+        sp = getattr(res, "velocity_spectra", None) if res else None
+        has_spectra = (
+            frame_ok
+            and isinstance(sp, np.ndarray)
+            and sp.shape == (n_axes, sp.shape[1])
+            and sp.size > 0
+            and np.any(sp)
+        )
+        has_velocities = (
+            frame_ok
+            and hasattr(res, "velocities")
+            and isinstance(res.velocities, np.ndarray)
+            and res.velocities.size > 0
+            and np.any(res.velocities)
+        )
+        cm = getattr(res, "corr_matrix", None) if res else None
+        has_corr = (
+            frame_ok
+            and isinstance(cm, np.ndarray)
+            and cm.shape == corr_shape
+            and np.any(cm)
+        )
+        has_vdos_norm = frame_ok and getattr(res, "vdos_norm", None) is not None
+        return has_spectra, has_velocities, has_corr, has_vdos_norm
+
+    def _fresean_run_plan(
+        self,
+        read_traj: bool,
+        compute_vdos: bool,
+        compute_corr_matrix: bool,
+        compute_modes: bool,
+        frame_key: tuple[Any, ...],
+        n_axes: int,
+        corr_shape: tuple[int, int, int],
+    ) -> _FreseanRunPlan:
+        """Work backwards from requested outputs to trajectory / spectral steps."""
+        calc_modes = compute_modes
+        calc_vdos = compute_vdos
+        calc_full_corr = compute_corr_matrix
+        calc_autocorr = None
+        calc_read_traj = read_traj
+        calc_velocity_fft = None
+
+        has_spectra, has_velocities, has_corr, has_vdos_norm = (
+            self._fresean_cache_check(frame_key, n_axes, corr_shape)
+        )
+
+        if calc_modes:
+            if not calc_full_corr and (not has_corr or not has_vdos_norm):
+                warnings.warn(
+                    "compute_modes requires corr_matrix and vdos_norm in pre-computed in cache, but is not present, so running that calculation",
+                    UserWarning,
+                    stacklevel=2,
+                )
+                calc_full_corr = True
+        if calc_full_corr or calc_vdos:
+            if not calc_full_corr:
+                calc_autocorr = True
+            if not has_spectra:
+                if has_velocities and not calc_read_traj:
+                    warnings.warn(
+                        "compute_corr_matrix requires velocity_spectra in pre-computed in cache, but is not present, computing the velocity FFT from available velocities",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+                    calc_velocity_fft = True
+                elif not has_velocities and not calc_read_traj:
+                    warnings.warn(
+                        "compute_corr_matrix requires velocity_spectra in pre-computed in cache, but is not present, and no velocities are available, so reading the trajectory and computing the velocity FFT",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+                    calc_read_traj = True
+                    calc_velocity_fft = True
+        if calc_read_traj:
+            calc_velocity_fft = True
+
+        return _FreseanRunPlan(
+            calc_read_traj=calc_read_traj,
+            calc_velocity_fft=calc_velocity_fft,
+            calc_full_corr_matrix=calc_full_corr,
+            calc_autocorr_diagonal=calc_autocorr,
+            calc_vdos=calc_vdos,
+            calc_modes=calc_modes,
+        )
+
+    def _reset_fresean_benchmark_phases(
+        self, timings: dict[str, float], plan: _FreseanRunPlan
+    ) -> None:
+        """Zero benchmark keys for phases that will run this ``run()`` call."""
+        if plan.calc_read_traj is True:
+            timings[BENCH_T_READ_TRAJ] = 0.0
+
+        if plan.calc_velocity_fft is True:
+            timings[BENCH_T_VELOCITY_SPECTRA] = 0.0
+
+        if plan.calc_full_corr_matrix or plan.calc_autocorr_diagonal is True:
+            timings[BENCH_T_CORR_MATRIX] = 0.0
+            timings[BENCH_T_VDOS] = 0.0
+
+        if plan.calc_modes:
+            timings[BENCH_T_EIGEN] = 0.0
 
     @staticmethod
     def _split_compute_option(
@@ -182,8 +318,6 @@ class FRESEAN(AnalysisBase):
             "win_time": FRESEAN._take_first_result,
             "n_dof": FRESEAN._take_first_result,
         }
-        if self._needs_corr_matrix():
-            lookup["corr_matrix"] = FRESEAN._take_first_result
         return ResultsGroup(lookup=lookup)
 
     def __init__(
@@ -220,11 +354,9 @@ class FRESEAN(AnalysisBase):
         self.lag_symmetrization = lag_symmetrization
         self._parallel = build_phase_parallelism(parallel)
         self.benchmark: Optional[dict[str, float]] = None
-        self.compute_modes = True
-        self.compute_vdos = True
+        self._run_plan: Optional[_FreseanRunPlan] = None
         self._mode_freqs_req: Optional[Sequence[float]] = None
         self._vdos_freqs_req: Optional[Sequence[float]] = None
-        self._update_freq_indices()
 
     @staticmethod
     def _frequency_grid(n_corr: int, dt: float) -> np.ndarray:
@@ -286,6 +418,22 @@ class FRESEAN(AnalysisBase):
     def _phase_parallel(self, phase: str) -> PhaseParallelism:
         return self._parallel[phase]
 
+    @staticmethod
+    def _add_benchmark_time(
+        timings: Optional[dict[str, float]], key: str, elapsed: float
+    ) -> None:
+        if timings is not None:
+            timings[key] = timings.get(key, 0.0) + elapsed
+
+    def _benchmark_timings_for_run(self) -> dict[str, float]:
+        """Phase timings for this run: fresh zeros, or prior :attr:`benchmark`."""
+        if self.benchmark is None:
+            return new_fresean_benchmark_timings()
+        timings = dict(self.benchmark)
+        for key in new_fresean_benchmark_timings():
+            timings.setdefault(key, 0.0)
+        return timings
+
     def _rfft_velocities(self, velocities: np.ndarray) -> np.ndarray:
         """Real FFT of the mass-weighted velocity matrix along the time axis."""
         spec = self._phase_parallel("velocity_fft")
@@ -305,7 +453,9 @@ class FRESEAN(AnalysisBase):
                 with ThreadPoolExecutor(max_workers=max_workers) as executor:
                     list(
                         executor.map(
-                            lambda rows: transform_rows(int(rows[0]), int(rows[-1]) + 1),
+                            lambda rows: transform_rows(
+                                int(rows[0]), int(rows[-1]) + 1
+                            ),
                             row_chunks,
                         )
                     )
@@ -380,7 +530,9 @@ class FRESEAN(AnalysisBase):
                 col_size = max(1, min(rem_cols, int(budget_pairs)))
                 j0 = i0
                 while j0 < n_elements:
-                    tiles.append((i0, i0 + 1, j0, min(j0 + col_size, n_elements)))
+                    tiles.append(
+                        (i0, i0 + 1, j0, min(j0 + col_size, n_elements))
+                    )
                     j0 += col_size
                 i0 += 1
         return tiles
@@ -391,22 +543,20 @@ class FRESEAN(AnalysisBase):
         i_upper, j_upper = np.triu_indices(n_elements, k=1)
         corr_matrix[:, j_upper, i_upper] = corr_matrix[:, i_upper, j_upper]
 
-    def _fill_corr_matrix_tile(
+    def _fill_corr_matrix_tile_from_spectra(
         self,
         tile: tuple[int, int, int, int],
-        velocities: np.ndarray,
+        spectra: np.ndarray,
         corr_matrix: np.ndarray,
         win_time: np.ndarray,
         n_corr: int,
         n_frames: int,
     ) -> None:
-        """Fill one upper-triangle tile of ``corr_matrix``."""
+        """Fill one upper-triangle tile of ``corr_matrix`` from velocity spectra."""
         i0, i1, j0, j1 = tile
-        row_vel = velocities[i0:i1]
-        col_vel = velocities[j0:j1]
-        cross_freq = np.real(
-            row_vel[:, None, :] * np.conj(col_vel[None, :, :])
-        )
+        row_sp = spectra[i0:i1]
+        col_sp = spectra[j0:j1]
+        cross_freq = np.real(row_sp[:, None, :] * np.conj(col_sp[None, :, :]))
         tmp_time = np.real(irfft(cross_freq, n=n_frames, axis=-1))
         windowed = self._window_time_batch(
             tmp_time,
@@ -416,24 +566,24 @@ class FRESEAN(AnalysisBase):
             self.lag_symmetrization,
         )
         # windowed is real with length 2*n_corr-1, so rfft yields n_corr bins.
-        spectra = np.real(rfft(windowed, axis=-1))
-        corr_matrix[:, i0:i1, j0:j1] = np.moveaxis(spectra, -1, 0)
+        corr_bins = np.real(rfft(windowed, axis=-1))
+        corr_matrix[:, i0:i1, j0:j1] = np.moveaxis(corr_bins, -1, 0)
 
     def _build_corr_matrix(
         self,
-        velocities: np.ndarray,
+        spectra: np.ndarray,
         corr_matrix: np.ndarray,
         win_time: np.ndarray,
         n_corr: int,
         n_frames: int,
         n_elements: int,
     ) -> None:
-        """Build the velocity cross-correlation matrix (vectorized tiles)."""
+        """Build the cross-correlation matrix from velocity spectra (tiled)."""
         budget_pairs = self._corr_matrix_budget_pairs(n_frames)
         tiles = self._corr_matrix_tiles(n_elements, budget_pairs)
         fill_tile = partial(
-            self._fill_corr_matrix_tile,
-            velocities=velocities,
+            self._fill_corr_matrix_tile_from_spectra,
+            spectra=spectra,
             corr_matrix=corr_matrix,
             win_time=win_time,
             n_corr=n_corr,
@@ -449,6 +599,61 @@ class FRESEAN(AnalysisBase):
                 with ThreadPoolExecutor(max_workers=max_workers) as executor:
                     list(executor.map(fill_tile, tiles))
         self._symmetrize_corr_matrix(corr_matrix, n_elements)
+
+    def _autocorr_diagonal_from_spectra(
+        self,
+        spectra: np.ndarray,
+        win_time: np.ndarray,
+        n_corr: int,
+        n_frames: int,
+    ) -> np.ndarray:
+        """Diagonal ``C_ii(omega)`` for DOF rows; ``(n_corr, n_dof)``."""
+        cross_freq = np.real(spectra * np.conj(spectra))
+        tmp_time = np.real(irfft(cross_freq, n=n_frames, axis=-1))
+        windowed = self._window_time_batch(
+            tmp_time,
+            n_corr,
+            n_frames,
+            win_time,
+            self.lag_symmetrization,
+        )
+        spectra_bins = np.real(rfft(windowed, axis=-1))
+        return spectra_bins.T
+
+    def _build_autocorr_diagonal(
+        self,
+        spectra: np.ndarray,
+        win_time: np.ndarray,
+        n_corr: int,
+        n_frames: int,
+        n_elements: int,
+    ) -> np.ndarray:
+        """Autocorrelation spectra on the diagonal; shape ``(n_corr, n_elements)``."""
+        spec = self._phase_parallel("corr_matrix")
+
+        def build_slice(i0: int, i1: int) -> np.ndarray:
+            return self._autocorr_diagonal_from_spectra(
+                spectra[i0:i1],
+                win_time,
+                n_corr,
+                n_frames,
+            )
+
+        with blas_thread_context(spec.omp_threads):
+            max_workers = resolve_n_jobs(spec.n_jobs)
+            if max_workers == 1:
+                return build_slice(0, n_elements)
+            diag = np.empty((n_corr, n_elements), dtype=np.float64)
+
+            def fill_rows(rows: np.ndarray) -> tuple[int, int, np.ndarray]:
+                i0, i1 = int(rows[0]), int(rows[-1]) + 1
+                return i0, i1, build_slice(i0, i1)
+
+            row_chunks = np.array_split(np.arange(n_elements), max_workers)
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                for i0, i1, block in executor.map(fill_rows, row_chunks):
+                    diag[:, i0:i1] = block
+            return diag
 
     def _diagonalize_corr_matrix(
         self,
@@ -508,10 +713,6 @@ class FRESEAN(AnalysisBase):
             "win_time": win_time,
             "n_dof": self._n_dof,
         }
-        if self._needs_corr_matrix():
-            result_fields["corr_matrix"] = np.empty(
-                (self.n_corr, n_elements, n_elements)
-            )
         self.results = Results(**result_fields)
 
     def _prepare(self):
@@ -536,6 +737,12 @@ class FRESEAN(AnalysisBase):
 
     def _conclude(self, timings: Optional[dict[str, float]] = None) -> None:
         """Velocity FFT, correlation matrix, normalization, VDOS, and modes."""
+        plan = self._run_plan
+        if plan is None:
+            raise RuntimeError(
+                "FRESEAN._conclude requires a run plan from run()."
+            )
+
         if not hasattr(self, "_n_elements"):
             self._init_run_metadata()
         n_elements = self._n_elements
@@ -544,74 +751,113 @@ class FRESEAN(AnalysisBase):
         freqs = self.results.freqs
         corr_shape = (n_corr, n_elements, n_elements)
         self._update_freq_indices()
-        if timings is not None:
-            for key in (
-                BENCH_T_VELOCITY_SPECTRA,
-                BENCH_T_CORR_MATRIX,
-                BENCH_T_EIGEN,
-            ):
-                timings.setdefault(key, 0.0)
 
-        if hasattr(self.results, "velocities"):
+        if plan.calc_velocity_fft is True:
+            if not hasattr(self.results, "velocities"):
+                raise RuntimeError(
+                    "Velocity FFT was planned but time-domain velocities are "
+                    "missing; read_traj=True or run a trajectory pass first."
+                )
             t_fft = time.perf_counter() if timings is not None else None
             self.results.velocity_spectra = self._rfft_velocities(
                 self.results.velocities
             )
             del self.results.velocities
             if t_fft is not None:
-                timings[BENCH_T_VELOCITY_SPECTRA] += time.perf_counter() - t_fft
+                self._add_benchmark_time(
+                    timings,
+                    BENCH_T_VELOCITY_SPECTRA,
+                    time.perf_counter() - t_fft,
+                )
 
-        corr_matrix = getattr(self.results, "corr_matrix", None)
-        reuse_corr = (
-            self.compute_modes
-            and not self.compute_vdos
-            and isinstance(corr_matrix, np.ndarray)
-            and corr_matrix.shape == corr_shape
+        corr_matrix: Optional[np.ndarray] = getattr(
+            self.results, "corr_matrix", None
         )
+        stored_corr: Optional[np.ndarray] = None
+        diag: Optional[np.ndarray] = None
 
-        if not reuse_corr:
+        built_full_corr = False
+        built_diag = False
+        if plan.calc_full_corr_matrix or plan.calc_autocorr_diagonal is True:
             spectra = getattr(self.results, "velocity_spectra", None)
             if spectra is None or spectra.size == 0:
                 raise RuntimeError(
-                    "results.velocity_spectra is missing; use read_traj=True."
+                    "results.velocity_spectra is missing; read_traj=True or "
+                    "run a prior step that fills velocity spectra."
                 )
             t_corr = time.perf_counter() if timings is not None else None
-            if not (
-                isinstance(corr_matrix, np.ndarray)
-                and corr_matrix.shape == corr_shape
-            ):
-                corr_matrix = np.empty(corr_shape)
-            self._build_corr_matrix(
-                spectra,
-                corr_matrix,
-                win_time,
-                n_corr,
-                self.n_frames,
-                n_elements,
-            )
-            corr_matrix /= self.n_frames
-            traces = np.trace(corr_matrix, axis1=1, axis2=2)
-            avg_temp = self._avg_temperature_from_traces(
-                traces, n_corr, win_time, self._n_dof
-            )
-            vdos_norm = n_corr * win_time[0] * (8.3145 * 0.1 * avg_temp)
-            if vdos_norm > 0:
-                corr_matrix /= vdos_norm
-            self.results.avg_temperature = avg_temp
-            self.results.vdos_norm = vdos_norm
-            if self.compute_vdos:
-                vidx = self._vdos_freq_idx
-                self.results.vdos_freqs = freqs[vidx]
-                self.results.vdos_total = np.trace(
-                    corr_matrix[vidx], axis1=1, axis2=2
+            if plan.calc_full_corr_matrix:
+                if not (
+                    isinstance(corr_matrix, np.ndarray)
+                    and corr_matrix.shape == corr_shape
+                ):
+                    corr_matrix = np.empty(corr_shape)
+                self._build_corr_matrix(
+                    spectra,
+                    corr_matrix,
+                    win_time,
+                    n_corr,
+                    self.n_frames,
+                    n_elements,
                 )
-            else:
-                self.results.vdos_freqs = None
-                self.results.vdos_total = None
-            if t_corr is not None:
-                timings[BENCH_T_CORR_MATRIX] = time.perf_counter() - t_corr
+                corr_matrix /= self.n_frames
+                built_full_corr = True
+            elif plan.calc_autocorr_diagonal is True:
+                diag = self._build_autocorr_diagonal(
+                    spectra,
+                    win_time,
+                    n_corr,
+                    self.n_frames,
+                    n_elements,
+                )
+                diag /= self.n_frames
+                corr_matrix = None
+                built_diag = True
+            if t_corr is not None and (built_full_corr or built_diag):
+                self._add_benchmark_time(
+                    timings,
+                    BENCH_T_CORR_MATRIX,
+                    time.perf_counter() - t_corr,
+                )
 
-        if self.compute_modes:
+            if built_full_corr or built_diag:
+                t_norm = time.perf_counter() if timings is not None else None
+                if built_full_corr:
+                    traces = np.trace(corr_matrix, axis1=1, axis2=2)
+                else:
+                    traces = np.sum(diag, axis=1)
+                avg_temp = self._avg_temperature_from_traces(
+                    traces, n_corr, win_time, self._n_dof
+                )
+                vdos_norm = n_corr * win_time[0] * (8.3145 * 0.1 * avg_temp)
+                if vdos_norm > 0:
+                    if built_full_corr:
+                        corr_matrix /= vdos_norm
+                    else:
+                        diag /= vdos_norm
+                self.results.avg_temperature = avg_temp
+                self.results.vdos_norm = vdos_norm
+                if plan.calc_vdos is True:
+                    vidx = self._vdos_freq_idx
+                    self.results.vdos_freqs = freqs[vidx]
+                    if vdos_norm > 0:
+                        self.results.vdos_total = traces[vidx] / vdos_norm
+                    else:
+                        self.results.vdos_total = traces[vidx].copy()
+                if t_norm is not None:
+                    self._add_benchmark_time(
+                        timings,
+                        BENCH_T_VDOS,
+                        time.perf_counter() - t_norm,
+                    )
+
+        if plan.calc_modes:
+            if corr_matrix is None:
+                raise RuntimeError(
+                    "Mode diagonalization requires a correlation matrix; "
+                    "use compute_corr_matrix=True or a prior run that stored "
+                    "results.corr_matrix."
+                )
             t_eigen = time.perf_counter() if timings is not None else None
             eigenvalues, eigenvectors = self._diagonalize_corr_matrix(
                 corr_matrix,
@@ -622,14 +868,18 @@ class FRESEAN(AnalysisBase):
             self.results.eigenvalues = eigenvalues
             self.results.eigenvectors = eigenvectors
             if t_eigen is not None:
-                timings[BENCH_T_EIGEN] = time.perf_counter() - t_eigen
+                self._add_benchmark_time(
+                    timings, BENCH_T_EIGEN, time.perf_counter() - t_eigen
+                )
         else:
             self.results.mode_freqs = None
             self.results.eigenvalues = None
             self.results.eigenvectors = None
 
-        self.results.corr_matrix = corr_matrix
-        self.results.corr_freqs = freqs
+        if self.compute_corr_matrix and isinstance(corr_matrix, np.ndarray):
+            stored_corr = corr_matrix
+        self.results.corr_matrix = stored_corr
+        self.results.corr_freqs = freqs if stored_corr is not None else None
 
     def run(
         self,
@@ -640,6 +890,7 @@ class FRESEAN(AnalysisBase):
         *,
         read_traj: bool = True,
         compute_vdos: ComputeOption = True,
+        compute_corr_matrix: bool = True,
         compute_modes: ComputeOption = True,
         verbose: Optional[bool] = None,
         n_workers: Optional[int] = None,
@@ -655,69 +906,89 @@ class FRESEAN(AnalysisBase):
         ----------
         read_traj : bool, optional
             If ``True`` (default), read the trajectory. If ``False``, reuse
-            ``results.corr_matrix`` or ``results.velocity_spectra`` from a
-            prior run with the same frame selection when possible.
+            cached results for the same ``fresean_frame_key`` when the run
+            plan allows it. Missing intermediates trigger :class:`UserWarning`
+            and may still read the trajectory or FFT stored velocities.
         compute_vdos : bool or sequence of float, optional
             ``False`` skips VDOS; ``True`` or a frequency list enables it.
+        compute_corr_matrix : bool, optional
+            If ``True`` (default), build the full normalized
+            ``results.corr_matrix`` and take VDOS from its trace. If
+            ``False`` and ``compute_vdos`` is enabled, VDOS is computed from
+            diagonal autocorrelation spectra only (``O(n)`` memory in DOF).
+            Required when ``compute_modes`` is enabled.
         compute_modes : bool or sequence of float, optional
             ``False`` skips mode diagonalization; ``True`` or a list enables it.
         benchmark : bool, optional
             If ``True``, record wall times for the major FRESEAN phases and
             return them as a dict. The same dict is stored on
-            :attr:`FRESEAN.benchmark`.
+            :attr:`FRESEAN.benchmark`. The first ``benchmark=True`` run
+            starts from zero per phase; later runs on the same instance
+            keep timings for skipped phases (e.g. ``read_traj=False``).
+            Phases that run again are reset to zero first, then timed
+            (multiple chunks in one phase still sum, e.g. trajectory read
+            plus FFT).
 
             Keys:
 
-            * ``bench_t_velocity_spectra`` — trajectory read (if any) plus
-              velocity FFT to ``results.velocity_spectra``.
-            * ``bench_t_corr_matrix`` — correlation matrix, normalization, and
-              VDOS (:meth:`compute_vdos`).
+            * ``bench_t_read_traj`` — trajectory read (mass-weighted velocities).
+            * ``bench_t_velocity_spectra`` — velocity FFT to
+              ``results.velocity_spectra``.
+            * ``bench_t_corr_matrix`` — correlation build (full matrix or
+              diagonal autocorrelation spectra only).
+            * ``bench_t_vdos`` — temperature normalization (and ``vdos_total``
+              when VDOS is enabled) after a spectral build.
             * ``bench_t_eigen`` — mode diagonalization (:meth:`compute_modes`).
-            * ``bench_t_spectral`` — sum of the three phases above (excludes
-              MDAnalysis setup/merge overhead).
+            * ``bench_t_fresean_total`` — sum of the spectral phases above
+              (excludes MDAnalysis setup/merge overhead).
 
         Returns
         -------
         self or dict
             ``self`` when ``benchmark=False``; otherwise a timing dict.
         """
-        self.compute_vdos, self._vdos_freqs_req = self._split_compute_option(
+        compute_vdos, self._vdos_freqs_req = self._split_compute_option(
             compute_vdos, "compute_vdos"
         )
-        self.compute_modes, self._mode_freqs_req = self._split_compute_option(
+        compute_modes, self._mode_freqs_req = self._split_compute_option(
             compute_modes, "compute_modes"
         )
-        if not self.compute_modes and not self.compute_vdos:
+        compute_corr_matrix = bool(compute_corr_matrix)
+        self.compute_vdos = compute_vdos
+        self.compute_modes = compute_modes
+        self.compute_corr_matrix = compute_corr_matrix
+        if not compute_modes and not compute_vdos:
             raise ValueError(
                 "At least one of compute_modes and compute_vdos must be True"
             )
+        if compute_modes and not compute_corr_matrix:
+            raise ValueError("compute_modes requires compute_corr_matrix=True")
         self._update_freq_indices()
 
         frame_key = self._frame_key(start, stop, step, frames)
         n_axes = self.atomgroup.n_atoms * 3
         corr_shape = (self.n_corr, n_axes, n_axes)
-        res = getattr(self, "results", None)
-        if (
-            not read_traj
-            and res is not None
-            and getattr(res, "fresean_frame_key", None) == frame_key
-        ):
-            sp = getattr(res, "velocity_spectra", None)
-            cm = getattr(res, "corr_matrix", None)
-            has_sp = (
-                isinstance(sp, np.ndarray) and sp.size > 0 and sp.shape[0] == n_axes
-            )
-            has_cm = isinstance(cm, np.ndarray) and cm.shape == corr_shape
-            if (self.compute_modes and not self.compute_vdos and has_cm) or (
-                self.compute_vdos and has_sp
-            ) or (self.compute_modes and has_sp):
-                timings = {BENCH_T_VELOCITY_SPECTRA: 0.0} if benchmark else None
-                self._conclude(timings)
-                self.results.fresean_frame_key = frame_key
-                if benchmark:
-                    self.benchmark = finalize_fresean_benchmark(timings)
-                    return self.benchmark
-                return self
+        self._run_plan = self._fresean_run_plan(
+            read_traj,
+            compute_vdos,
+            compute_corr_matrix,
+            compute_modes,
+            frame_key,
+            n_axes,
+            corr_shape,
+        )
+
+        if self._run_plan.calc_read_traj is not True:
+            timings = None
+            if benchmark:
+                timings = self._benchmark_timings_for_run()
+                self._reset_fresean_benchmark_phases(timings, self._run_plan)
+            self._conclude(timings)
+            self.results.fresean_frame_key = frame_key
+            if benchmark:
+                self.benchmark = finalize_fresean_benchmark(timings)
+                return self.benchmark
+            return self
 
         if not benchmark:
             out = super().run(
@@ -785,9 +1056,9 @@ class FRESEAN(AnalysisBase):
             start=start, stop=stop, step=step, frames=frames, n_parts=n_parts
         )
 
-        t_velocity = time.perf_counter()
+        t_read_traj = time.perf_counter()
         remote_objects = executor.apply(worker_func, computation_groups)
-        bench_t_velocity_spectra = time.perf_counter() - t_velocity
+        bench_t_read_traj = time.perf_counter() - t_read_traj
 
         self.frames = np.hstack([obj.frames for obj in remote_objects])
         self.times = np.hstack([obj.times for obj in remote_objects])
@@ -796,10 +1067,13 @@ class FRESEAN(AnalysisBase):
         results_aggregator = self._get_aggregator()
         self.results = results_aggregator.merge(remote_results)
 
-        timings: dict[str, float] = {
-            BENCH_T_VELOCITY_SPECTRA: bench_t_velocity_spectra
-        }
-        self._conclude(timings=timings)
+        timings = self._benchmark_timings_for_run()
+        self._reset_fresean_benchmark_phases(timings, self._run_plan)
+        if self._run_plan.calc_read_traj is True:
+            self._add_benchmark_time(
+                timings, BENCH_T_READ_TRAJ, bench_t_read_traj
+            )
+        self._conclude(timings)
         self.results.fresean_frame_key = frame_key
         self.benchmark = finalize_fresean_benchmark(timings)
         return self.benchmark
