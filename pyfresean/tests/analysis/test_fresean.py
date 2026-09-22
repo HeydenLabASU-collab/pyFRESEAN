@@ -338,9 +338,7 @@ class TestFRESEAN:
                 for j in range(j0, j1):
                     if j >= i:
                         covered.add((i, j))
-        expected = {
-            (i, j) for i in range(5) for j in range(i, 5)
-        }
+        expected = {(i, j) for i in range(5) for j in range(i, 5)}
         assert covered == expected
         assert all(j0 >= i0 for i0, _, j0, _ in tiles)
 
