@@ -36,8 +36,8 @@ from pyfresean.benchmark_keys import (
     BENCH_T_PY_COARSE,
     BENCH_T_PY_FRESEAN,
     BENCH_T_PY_TOTAL,
-    BENCH_T_SPECTRAL,
-    BENCH_T_TOTAL,
+    BENCH_T_CG_TOTAL,
+    BENCH_T_FRESEAN_TOTAL,
 )
 from pyfresean.coarsegrain.coarse import CoarseGrain
 from pyfresean.parallel import set_blas_threads
@@ -206,7 +206,7 @@ def run_c_cg_reference(
             data = json.loads(result_json.read_text())
             phases = data.get("c_coarse") or {}
             total = float(
-                data.get(BENCH_T_C_COARSE, phases.get(BENCH_T_TOTAL, 0.0))
+                data.get(BENCH_T_C_COARSE, phases.get(BENCH_T_CG_TOTAL, 0.0))
             )
             return total, phases
         return 0.0, {}
@@ -309,12 +309,12 @@ topol-cg.mtop
     traj_src = paths.data_dir / "traj-cg.trr"
     traj_link.symlink_to(traj_src.resolve())
 
-    phases[BENCH_T_TOTAL] = (
+    phases[BENCH_T_CG_TOTAL] = (
         phases["bench_t_mtop"]
         + phases["bench_t_trjconv"]
         + phases["bench_t_coarse"]
     )
-    return phases[BENCH_T_TOTAL], phases
+    return phases[BENCH_T_CG_TOTAL], phases
 
 
 def run_c_aa_reference(
@@ -330,7 +330,7 @@ def run_c_aa_reference(
             data = json.loads(result_json.read_text())
             phases = data.get("c_coarse") or {}
             total = float(
-                data.get(BENCH_T_C_COARSE, phases.get(BENCH_T_TOTAL, 0.0))
+                data.get(BENCH_T_C_COARSE, phases.get(BENCH_T_CG_TOTAL, 0.0))
             )
             return total, phases
         return 0.0, {}
@@ -409,12 +409,12 @@ def run_c_aa_reference(
         check=True,
     )
     phases["bench_t_ref"] = time.perf_counter() - t_ref
-    phases[BENCH_T_TOTAL] = (
+    phases[BENCH_T_CG_TOTAL] = (
         phases["bench_t_mtop"]
         + phases["bench_t_trjconv"]
         + phases["bench_t_ref"]
     )
-    return phases[BENCH_T_TOTAL], phases
+    return phases[BENCH_T_CG_TOTAL], phases
 
 
 def _ensure_c_inputs(
@@ -589,7 +589,7 @@ def run_py_fresean_aa_only(
         benchmark=True,
         stop=n_frames,
     )
-    bench_t_py_fresean = float(phases[BENCH_T_SPECTRAL])
+    bench_t_py_fresean = float(phases[BENCH_T_FRESEAN_TOTAL])
     _ = analysis.results.freqs.shape
     return bench_t_py_fresean, phases
 
@@ -620,7 +620,7 @@ def run_py_fresean_only(
     )
 
     phases = analysis.run(verbose=False, benchmark=True)
-    bench_t_py_fresean = float(phases[BENCH_T_SPECTRAL])
+    bench_t_py_fresean = float(phases[BENCH_T_FRESEAN_TOTAL])
     _ = analysis.results.freqs.shape
     return bench_t_py_fresean, phases, cg
 
@@ -712,7 +712,7 @@ def _load_py_cg_reference_total(cg_ref_json: Path) -> float:
         return 0.0
     data = json.loads(cg_ref_json.read_text())
     coarse = data.get("py_coarse") or {}
-    return float(coarse.get(BENCH_T_TOTAL, data.get(BENCH_T_PY_COARSE, 0.0)))
+    return float(coarse.get(BENCH_T_CG_TOTAL, data.get(BENCH_T_PY_COARSE, 0.0)))
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -824,8 +824,8 @@ def main(argv: list[str] | None = None) -> int:
         py_coarse_phases, cache_dir = run_py_cg_reference(
             args.n_frames, args.output_dir
         )
-        bench_t_py_coarse = float(py_coarse_phases[BENCH_T_TOTAL])
-        print(f"  bench_t_total: {bench_t_py_coarse:.2f} s")
+        bench_t_py_coarse = float(py_coarse_phases[BENCH_T_CG_TOTAL])
+        print(f"  bench_t_cg_total: {bench_t_py_coarse:.2f} s")
         print(f"  cache: {cache_dir}")
 
     elif mode == "c_cg":
