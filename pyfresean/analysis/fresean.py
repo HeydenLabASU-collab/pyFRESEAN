@@ -13,7 +13,15 @@ import warnings
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from functools import partial
-from typing import TYPE_CHECKING, Any, Literal, Mapping, Optional, Sequence, Union
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Literal,
+    Mapping,
+    Optional,
+    Sequence,
+    Union,
+)
 
 import numpy as np
 from MDAnalysis.analysis.backends import BackendBase, BackendSerial
@@ -450,7 +458,9 @@ class FRESEAN(AnalysisBase):
                 with ThreadPoolExecutor(max_workers=max_workers) as executor:
                     list(
                         executor.map(
-                            lambda rows: transform_rows(int(rows[0]), int(rows[-1]) + 1),
+                            lambda rows: transform_rows(
+                                int(rows[0]), int(rows[-1]) + 1
+                            ),
                             row_chunks,
                         )
                     )
@@ -525,7 +535,9 @@ class FRESEAN(AnalysisBase):
                 col_size = max(1, min(rem_cols, int(budget_pairs)))
                 j0 = i0
                 while j0 < n_elements:
-                    tiles.append((i0, i0 + 1, j0, min(j0 + col_size, n_elements)))
+                    tiles.append(
+                        (i0, i0 + 1, j0, min(j0 + col_size, n_elements))
+                    )
                     j0 += col_size
                 i0 += 1
         return tiles
@@ -732,7 +744,9 @@ class FRESEAN(AnalysisBase):
         """Velocity FFT, correlation matrix, normalization, VDOS, and modes."""
         plan = self._run_plan
         if plan is None:
-            raise RuntimeError("FRESEAN._conclude requires a run plan from run().")
+            raise RuntimeError(
+                "FRESEAN._conclude requires a run plan from run()."
+            )
 
         if not hasattr(self, "_n_elements"):
             self._init_run_metadata()
@@ -953,9 +967,7 @@ class FRESEAN(AnalysisBase):
                 "At least one of compute_modes and compute_vdos must be True"
             )
         if compute_modes and not compute_corr_matrix:
-            raise ValueError(
-                "compute_modes requires compute_corr_matrix=True"
-            )
+            raise ValueError("compute_modes requires compute_corr_matrix=True")
         self._update_freq_indices()
 
         frame_key = self._frame_key(start, stop, step, frames)
