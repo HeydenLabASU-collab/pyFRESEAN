@@ -114,11 +114,16 @@ def py_fresean_velocity_matrix_time(row: dict) -> float:
     )
 
 
-def py_fresean_eigen_phase_time(row: dict) -> float:
-    """VDOS normalization + mode diagonalization (plotted as one phase)."""
-    return nested_bench(row, "py_fresean", BENCH_T_VDOS) + nested_bench(
-        row, "py_fresean", BENCH_T_EIGEN
+def py_fresean_corr_phase_time(row: dict) -> float:
+    """Correlation build + VDOS normalization (plotted as one phase)."""
+    return nested_bench(row, "py_fresean", BENCH_T_CORR_MATRIX) + nested_bench(
+        row, "py_fresean", BENCH_T_VDOS
     )
+
+
+def py_fresean_eigen_phase_time(row: dict) -> float:
+    """Mode diagonalization (plotted as one phase)."""
+    return nested_bench(row, "py_fresean", BENCH_T_EIGEN)
 
 
 def py_fresean_time(row: dict) -> float:
@@ -579,15 +584,15 @@ def plot_case_breakdown(
     )
     ax.plot(
         ncpus,
-        [nested_bench(r, "py_fresean", BENCH_T_CORR_MATRIX) for r in rows],
+        [py_fresean_corr_phase_time(r) for r in rows],
         "s-",
-        label="corr matrix",
+        label="corr matrix + vdos",
     )
     ax.plot(
         ncpus,
         [py_fresean_eigen_phase_time(r) for r in rows],
         "v-",
-        label="vdos + eigen",
+        label="eigen",
     )
     ax.plot(
         ncpus,

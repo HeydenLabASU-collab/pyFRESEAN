@@ -88,8 +88,8 @@ bash bench/hewl/submit.sh py_fresean_hybrid  # hybrid only
 Per case under `results/results_{cg,aa}/plots/{case}/`:
 
 - `total_vs_c.png` — wall time vs C covar+eigen
-- `breakdown.png` — three phases: velocity matrix (read+FFT), corr matrix,
-  vdos+eigen (sums the five internal `bench_t_*` keys for plotting)
+- `breakdown.png` — three phases: velocity matrix (read+FFT), corr matrix +
+  vdos, eigen (aggregates the five internal `bench_t_*` keys for plotting)
 - `speedup.png` — \(T_1 / T_N\)
 - `inverse_walltime.png` — \(1 / T_N\)
 
