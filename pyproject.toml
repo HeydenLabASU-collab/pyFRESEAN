@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyfresean"
-description = "A Python package for FRESEAN based analysis"
+description = "A Python package for FRESEAN analysis"
 license = "MIT"
 license-files = ["LICENSE", "AUTHORS.md"]
 

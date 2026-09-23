@@ -1,6 +1,6 @@
 # How to contribute
 
-We welcome all contributions to PyFRESEAN!
+We welcome all contributions to pyFRESEAN!
 
 Contributions can take many forms, such as:
 

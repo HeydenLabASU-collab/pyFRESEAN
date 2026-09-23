@@ -1,4 +1,4 @@
-# PyFRESEAN examples
+# pyFRESEAN examples
 
 Three example notebooks for FRESEAN analysis with the `pyfresean` package.
 

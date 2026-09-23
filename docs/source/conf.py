@@ -21,7 +21,7 @@ import pyfresean  # noqa
 
 # -- Project information -----------------------------------------------------
 
-project = "PyFRESEAN"
+project = "pyFRESEAN"
 copyright = (
     "2026, Amruthesh Thirumalaiswamy. "
     "Project structure based on the "
@@ -158,7 +158,7 @@ latex_documents = [
     (
         master_doc,
         "pyfresean.tex",
-        "PyFRESEAN Documentation",
+        "pyFRESEAN Documentation",
         "pyfresean",
         "manual",
     ),
@@ -169,7 +169,7 @@ latex_documents = [
 
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
-man_pages = [(master_doc, "pyfresean", "PyFRESEAN Documentation", [author], 1)]
+man_pages = [(master_doc, "pyfresean", "pyFRESEAN Documentation", [author], 1)]
 
 
 # -- Options for Texinfo output ----------------------------------------------
@@ -181,7 +181,7 @@ texinfo_documents = [
     (
         master_doc,
         "pyfresean",
-        "PyFRESEAN Documentation",
+        "pyFRESEAN Documentation",
         author,
         "pyfresean",
         "A Python package for FRESEAN based analysis",

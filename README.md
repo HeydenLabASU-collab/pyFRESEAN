@@ -1,4 +1,4 @@
-PyFRESEAN
+pyFRESEAN
 ==============================
 [//]: # (Badges)
 
@@ -75,9 +75,13 @@ Reference data:
 - `pyfresean/tests/data/fresean_pytutorial_ref/` — Python tutorial comparisons
 - `pyfresean/tests/data/fresean_c_ref/` — FRESEAN COARSE (C) comparisons
 
+On CI, every pull request runs unit tests plus all `pytutorial_ref` and
+`c_ref` regressions. Download the **`c-ref-plots-*`** artifact from the
+workflow run (Actions tab) for eigenvalue and VDoS PNG comparisons.
+
 ### Installation
 
-To build PyFRESEAN from source,
+To build pyFRESEAN from source,
 we highly recommend using virtual environments.
 If possible, we strongly recommend that you use
 [Anaconda](https://docs.conda.io/en/latest/) as your package manager.
@@ -147,4 +151,4 @@ Copyright (c) 2026, Amruthesh Thirumalaiswamy
  
 Project based on the 
 [MDAnalysis Cookiecutter](https://github.com/MDAnalysis/cookiecutter-mda) version 0.1.
-Please cite [MDAnalysis](https://github.com/MDAnalysis/mdanalysis#citation) when using PyFRESEAN in published work.
+Please cite [MDAnalysis](https://github.com/MDAnalysis/mdanalysis#citation) when using pyFRESEAN in published work.

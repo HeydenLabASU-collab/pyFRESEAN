@@ -22,6 +22,10 @@ The rules for this file:
 - @amruthesht
 
 ### Added
+- CI uploads ``c-ref-plots-*`` workflow artifacts (PNG comparisons from
+  ``c_ref`` regression runs with ``--c-ref-plot``).
+
+### Added
 - :meth:`FRESEAN.run` ``compute_corr_matrix`` flag (default ``True``). With
   ``compute_vdos=True`` and ``compute_corr_matrix=False``, total VDOS is
   built from batched diagonal autocorrelation spectra (same lag/window
@@ -118,6 +122,15 @@ The rules for this file:
 
 ### Changed
 
+- Canonical repository:
+  ``https://github.com/HeydenLabASU-collab/pyFRESEAN`` (formerly
+  ``amruthesht/pyfresean``); README badges, CONTRIBUTING, and CI org guard
+  updated.
+- Project branding uses **pyFRESEAN** in docs and prose; PyPI/import name
+  remains ``pyfresean``.
+- GitHub Actions: ``reference-regression-tests`` runs all ``pytutorial_ref``
+  and ``c_ref`` files on every PR/push (including HEWL); Codecov upload moved
+  to the unit-test job (ubuntu / Python 3.12 / MDAnalysis latest only).
 - FRESEAN work for each :meth:`run` is planned in ``_fresean_run_plan``;
   :meth:`_conclude` and ``benchmark=True`` follow plan flags (trajectory
   read, velocity FFT, full or diagonal correlation spectra, normalization,

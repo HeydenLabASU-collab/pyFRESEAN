@@ -991,7 +991,7 @@ class CoarseGrain:
         mapping = self._ensure_mapping()
         lines = [
             ";",
-            "; PyFRESEAN coarse-grained topology",
+            "; pyFRESEAN coarse-grained topology",
             ";",
             "",
             "[ defaults ]",
