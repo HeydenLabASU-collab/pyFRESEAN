@@ -52,7 +52,7 @@ doc = [
 ]
 
 # [project.urls]
-# source = "https://github.com/amruthesht/pyfresean"
+# source = "https://github.com/HeydenLabASU-collab/pyFRESEAN"
 # documentation = "https://pyfresean.readthedocs.io"
 
 [tool.setuptools.packages.find]

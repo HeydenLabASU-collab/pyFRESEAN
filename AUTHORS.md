@@ -1,10 +1,10 @@
 # Authors
 
-PyFRESEAN was created by Amruthesh Thirumalaiswamy in 2026.
+pyFRESEAN was created by Amruthesh Thirumalaiswamy in 2026.
 
 
 All contributing authors are listed in this file below.
-The repository history at https://github.com/amruthesht/pyfresean
+The repository history at https://github.com/HeydenLabASU-collab/pyFRESEAN
 and the CHANGELOG show individual code contributions.
 
 ## Chronological list of authors
