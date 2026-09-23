@@ -23,7 +23,7 @@ The rules for this file:
 
 ### Added
 - CI uploads ``c-ref-plots-*`` workflow artifacts (PNG comparisons from
-  ``c_ref`` regression runs with ``--c-ref-plot``).
+  ``c_ref`` regression runs with ``--c-ref-plot``). (PR #12)
 
 ### Added
 - :meth:`FRESEAN.run` ``compute_corr_matrix`` flag (default ``True``). With
@@ -125,12 +125,12 @@ The rules for this file:
 - Canonical repository:
   ``https://github.com/HeydenLabASU-collab/pyFRESEAN`` (formerly
   ``amruthesht/pyfresean``); README badges, CONTRIBUTING, and CI org guard
-  updated.
+  updated. (PR #12)
 - Project branding uses **pyFRESEAN** in docs and prose; PyPI/import name
-  remains ``pyfresean``.
+  remains ``pyfresean``. (PR #12)
 - GitHub Actions: ``reference-regression-tests`` runs all ``pytutorial_ref``
   and ``c_ref`` files on every PR/push (including HEWL); Codecov upload moved
-  to the unit-test job (ubuntu / Python 3.12 / MDAnalysis latest only).
+  to the unit-test job (ubuntu / Python 3.12 / MDAnalysis latest only). (PR #12)
 - FRESEAN work for each :meth:`run` is planned in ``_fresean_run_plan``;
   :meth:`_conclude` and ``benchmark=True`` follow plan flags (trajectory
   read, velocity FFT, full or diagonal correlation spectra, normalization,
