@@ -191,7 +191,7 @@ jobs:
       run: |
         which pip
         which python
-        pip install pylint mdanalysis
+        pip install "pylint>=3.2,<5" mdanalysis
 
     - name: Run Pylint
       env:

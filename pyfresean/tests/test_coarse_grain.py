@@ -49,7 +49,7 @@ def _make_protein_universe(n_frames: int = 2):
 
 def test_cg_universe_requires_input():
     with pytest.raises(TypeError):
-        CoarseGrain.cg_universe()
+        CoarseGrain.cg_universe()  # pylint: disable=no-value-for-parameter
 
 
 def test_resolve_universe_accepts_universe_path_and_tuple(tmp_path):
@@ -439,7 +439,7 @@ def test_map_positions_matches_hand_com():
     cg = CoarseGrain.from_atomgroup(u.atoms)
     bead_pos = cg.map_positions(u.atoms.positions)
 
-    back_atoms = u.atoms[[0, 1, 2, 3]]
+    back_atoms = u.select_atoms("index 0 1 2 3")
     expected_back = np.average(
         back_atoms.positions, axis=0, weights=back_atoms.masses
     )
