@@ -20,11 +20,11 @@ concurrency:
 
 defaults:
   run:
-    shell: bash  -l {0} 
+    shell: bash  -l {0}
 
 jobs:
   main-tests:
-    if: "github.repository == 'amruthesht/pyfresean'"
+    if: github.repository_owner == 'HeydenLabASU-collab'
     runs-on: ${{ matrix.os }}
     strategy:
         fail-fast: false
@@ -61,18 +61,25 @@ jobs:
         show-channel-urls: true
 
 
+    # On Windows, install-mdanalysis uses pip for develop (works) but mamba for
+    # latest (broken: uninstalls conda mdanalysis then mamba never runs in bash).
     - name: Install MDAnalysis version
+      if: runner.os != 'Windows' || matrix.mdanalysis-version == 'develop'
       uses: MDAnalysis/install-mdanalysis@main
       with:
         version: ${{ matrix.mdanalysis-version }}
         install-tests: false
-        installer:  mamba 
-        shell: bash  -l {0} 
-      
+        installer: mamba
+        shell: bash -l {0}
+
+    - name: MDAnalysis latest on Windows (keep conda env package)
+      if: runner.os == 'Windows' && matrix.mdanalysis-version == 'latest'
+      run: python -c "import MDAnalysis as mda; print(mda.__version__)"
+
     - name: Install package
       run: |
         python --version
-        python -m pip install .  --no-deps 
+        python -m pip install . --no-deps
 
     - name: Python information
       run: |
@@ -84,14 +91,30 @@ jobs:
         conda list
 
 
-    - name: Run tests
+    - name: Run unit tests
       run: |
         pytest -n 2 -v --cov=pyfresean --cov-report=xml --color=yes pyfresean/tests/
 
-  regression-tests:
-    if: "github.repository == 'amruthesht/pyfresean'"
+    - name: Upload coverage to Codecov
+      if: >-
+        github.event_name != 'schedule'
+        && matrix.os == 'ubuntu-latest'
+        && matrix.python-version == '3.12'
+        && matrix.mdanalysis-version == 'latest'
+      uses: codecov/codecov-action@v5
+      with:
+        file: coverage.xml
+        name: codecov-unit-ubuntu-py3.12
+        verbose: true
+        token: ${{ secrets.CODECOV_TOKEN }}
+        # Set true after CODECOV_TOKEN is added (org Codecov app + repo secret).
+        fail_ci_if_error: false
+
+
+  reference-regression-tests:
+    if: github.repository_owner == 'HeydenLabASU-collab'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 90
 
     steps:
     - uses: actions/checkout@v4
@@ -115,35 +138,45 @@ jobs:
         installer: mamba
         shell: bash -l {0}
 
-    - name: Install package
-      run: python -m pip install . --no-deps
+    - name: Install package and matplotlib (c_ref plots)
+      run: |
+        python -m pip install . --no-deps
+        python -m pip install matplotlib
 
-    - name: Run FRESEAN ala dipeptide gas-50K pytutorial_ref tests
-      run: pytest -m pytutorial_ref -v --tb=short pyfresean/tests/test_fresean_regression_ala_dipeptide_gas_50K_pytutorial_ref.py
+    - name: Prepare plot output directories
+      run: |
+        mkdir -p ci-artifacts/c-ref-plots/ala_dipeptide_gas_300K
+        mkdir -p ci-artifacts/c-ref-plots/hewl_solution_303K
 
-    - name: Run FRESEAN ala dipeptide gas-300K c_ref tests
-      run: pytest -m c_ref -v --tb=short pyfresean/tests/test_fresean_regression_ala_dipeptide_gas_300K_c_ref.py
+    - name: Run pytutorial_ref regression (Python tutorial reference)
+      run: |
+        pytest -m pytutorial_ref -v --tb=short \
+          pyfresean/tests/test_fresean_regression_ala_dipeptide_gas_50K_pytutorial_ref.py
 
-    - name: codecov
-      if: github.repository == 'amruthesht/pyfresean' && github.event_name != 'schedule'
-      uses: codecov/codecov-action@v5
+    - name: Run c_ref regression — alanine dipeptide (gas, 300 K)
+      run: |
+        pytest -m c_ref -v --tb=short --c-ref-plot \
+          --c-ref-plot-dir ci-artifacts/c-ref-plots/ala_dipeptide_gas_300K \
+          pyfresean/tests/test_fresean_regression_ala_dipeptide_gas_300K_c_ref.py
+
+    - name: Run c_ref regression — HEWL (solution, 303 K)
+      run: |
+        pytest -m c_ref -v --tb=short --c-ref-plot \
+          --c-ref-plot-dir ci-artifacts/c-ref-plots/hewl_solution_303K \
+          pyfresean/tests/test_fresean_regression_hewl_solution_303K_c_ref.py
+
+    - name: Upload c_ref comparison plots
+      if: always()
+      uses: actions/upload-artifact@v4
       with:
-        file: coverage.xml
-        name: codecov-${{ matrix.os }}-py${{ matrix.python-version }}
-        verbose: True
-        # to upload coverage reports, set a secret called CODECOV_TOKEN
-        # in the repository settings
-        # (Obtain this from the Codecov website after setting up the repository there)
-        token: ${{ secrets.CODECOV_TOKEN }}
-        # To fail the CI if there's an error, keep this set to true
-        # If repository forks need to run CI, you may need to set this to false
-        # Forks can't access the CODECOV_TOKEN secret,
-        # and a failed upload registers as an error
-        fail_ci_if_error: true
+        name: c-ref-plots-${{ github.workflow }}-${{ github.run_id }}
+        path: ci-artifacts/c-ref-plots/
+        if-no-files-found: warn
+        retention-days: 30
 
 
   pylint_check:
-    if: "github.repository == 'amruthesht/pyfresean'"
+    if: github.repository_owner == 'HeydenLabASU-collab'
     runs-on: ubuntu-latest
 
     steps:
@@ -158,7 +191,7 @@ jobs:
       run: |
         which pip
         which python
-        pip install pylint mdanalysis
+        pip install "pylint>=3.2,<5" mdanalysis
 
     - name: Run Pylint
       env:
@@ -168,7 +201,7 @@ jobs:
 
 
   pypi_check:
-    if: "github.repository == 'amruthesht/pyfresean'"
+    if: github.repository_owner == 'HeydenLabASU-collab'
     runs-on: ubuntu-latest
 
     steps:

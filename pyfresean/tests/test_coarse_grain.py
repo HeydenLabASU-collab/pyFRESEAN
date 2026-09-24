@@ -49,7 +49,7 @@ def _make_protein_universe(n_frames: int = 2):
 
 def test_cg_universe_requires_input():
     with pytest.raises(TypeError):
-        CoarseGrain.cg_universe()
+        CoarseGrain.cg_universe()  # pylint: disable=no-value-for-parameter
 
 
 def test_resolve_universe_accepts_universe_path_and_tuple(tmp_path):
@@ -439,7 +439,7 @@ def test_map_positions_matches_hand_com():
     cg = CoarseGrain.from_atomgroup(u.atoms)
     bead_pos = cg.map_positions(u.atoms.positions)
 
-    back_atoms = u.atoms[[0, 1, 2, 3]]
+    back_atoms = u.select_atoms("index 0 1 2 3")
     expected_back = np.average(
         back_atoms.positions, axis=0, weights=back_atoms.masses
     )
@@ -599,27 +599,6 @@ def test_cg_universe_shapes():
     u.trajectory[0]
     cg_bead_pos = cg.map_positions(u.atoms.positions)
     np.testing.assert_allclose(u_cg.trajectory[0].positions, cg_bead_pos)
-
-
-def test_cg_universe_writes_standard_files(tmp_path):
-    u = _make_protein_universe(n_frames=2)
-    cg = CoarseGrain.from_atomgroup(u.atoms)
-    top_path = tmp_path / "cg.pdb"
-    traj_path = tmp_path / "cg.trr"
-
-    u_cg = cg.build_universe(
-        output_cg_topology=str(top_path), output_cg_trajectory=str(traj_path)
-    )
-
-    assert top_path.is_file()
-    assert traj_path.is_file()
-    assert u_cg.atoms.n_atoms == 3
-
-    u_top = mda.Universe(str(top_path))
-    u_traj = mda.Universe(str(top_path), str(traj_path))
-    assert u_top.atoms.n_atoms == 3
-    assert len(u_traj.trajectory) == 2
-    assert u_traj.trajectory.ts.has_velocities
 
 
 def test_cg_universe_writes_standard_files(tmp_path):

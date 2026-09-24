@@ -1,14 +1,14 @@
-class PyFRESEANWarning(UserWarning):
-    """Recoverable issue during PyFRESEAN analysis or transformations."""
+class pyFRESEANWarning(UserWarning):
+    """Recoverable issue during pyFRESEAN analysis or transformations."""
 
 
-class MissingBoxWarning(PyFRESEANWarning):
+class MissingBoxWarning(pyFRESEANWarning):
     """Trajectory frame has no periodic box dimensions."""
 
 
-class MissingBeadMassWarning(PyFRESEANWarning):
+class MissingBeadMassWarning(pyFRESEANWarning):
     """CG bead masses were restored from the coarse-grain mapping."""
 
 
-class TopologyFormatWarning(PyFRESEANWarning):
+class TopologyFormatWarning(pyFRESEANWarning):
     """Topology file format may not preserve bead masses on reload."""

@@ -1,5 +1,5 @@
 """
-PyFRESEAN
+pyFRESEAN
 A Python package for FRESEAN based analysis
 """
 

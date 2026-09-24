@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyfresean"
-description = "A Python package for FRESEAN based analysis"
+description = "A Python package for FRESEAN analysis"
 license = "MIT"
 license-files = ["LICENSE", "AUTHORS.md"]
 
@@ -52,7 +52,7 @@ doc = [
 ]
 
 # [project.urls]
-# source = "https://github.com/amruthesht/pyfresean"
+# source = "https://github.com/HeydenLabASU-collab/pyFRESEAN"
 # documentation = "https://pyfresean.readthedocs.io"
 
 [tool.setuptools.packages.find]
@@ -72,6 +72,7 @@ addopts = "-m 'not slow and not pytutorial_ref and not c_ref'"
 
 [tool.black]
 line-length = 80
+target-version = ["py39"]
 
 [tool.versioningit]
 default-version = "1+unknown"
