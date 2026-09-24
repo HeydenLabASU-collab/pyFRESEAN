@@ -622,27 +622,6 @@ def test_cg_universe_writes_standard_files(tmp_path):
     assert u_traj.trajectory.ts.has_velocities
 
 
-def test_cg_universe_writes_standard_files(tmp_path):
-    u = _make_protein_universe(n_frames=2)
-    cg = CoarseGrain.from_atomgroup(u.atoms)
-    top_path = tmp_path / "cg.pdb"
-    traj_path = tmp_path / "cg.trr"
-
-    u_cg = cg.build_universe(
-        output_cg_topology=str(top_path), output_cg_trajectory=str(traj_path)
-    )
-
-    assert top_path.is_file()
-    assert traj_path.is_file()
-    assert u_cg.atoms.n_atoms == 3
-
-    u_top = mda.Universe(str(top_path))
-    u_traj = mda.Universe(str(top_path), str(traj_path))
-    assert u_top.atoms.n_atoms == 3
-    assert len(u_traj.trajectory) == 2
-    assert u_traj.trajectory.ts.has_velocities
-
-
 def test_cg_universe_writes_top_file(tmp_path):
     u = _make_protein_universe(n_frames=2)
     cg = CoarseGrain.from_atomgroup(u.atoms)
