@@ -61,13 +61,20 @@ jobs:
         show-channel-urls: true
 
 
+    # On Windows, install-mdanalysis uses pip for develop (works) but mamba for
+    # latest (broken: uninstalls conda mdanalysis then mamba never runs in bash).
     - name: Install MDAnalysis version
+      if: runner.os != 'Windows' || matrix.mdanalysis-version == 'develop'
       uses: MDAnalysis/install-mdanalysis@main
       with:
         version: ${{ matrix.mdanalysis-version }}
         install-tests: false
-        installer:  mamba
-        shell: bash  -l {0}
+        installer: mamba
+        shell: bash -l {0}
+
+    - name: MDAnalysis latest on Windows (keep conda env package)
+      if: runner.os == 'Windows' && matrix.mdanalysis-version == 'latest'
+      run: python -c "import MDAnalysis as mda; print(mda.__version__)"
 
     - name: Install package
       run: |
