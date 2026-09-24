@@ -72,6 +72,7 @@ addopts = "-m 'not slow and not pytutorial_ref and not c_ref'"
 
 [tool.black]
 line-length = 80
+target-version = ["py39"]
 
 [tool.versioningit]
 default-version = "1+unknown"
