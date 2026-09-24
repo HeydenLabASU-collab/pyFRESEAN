@@ -128,6 +128,10 @@ The rules for this file:
   updated. (PR #12)
 - Project branding uses **pyFRESEAN** in docs and prose; PyPI/import name
   remains ``pyfresean``. (PR #12)
+- Pylint CI: pylint 4 compatibility (``.pylintrc``), ``fail-under=9.2``; remove
+  duplicate CG unit test.
+- GitHub Actions: on Windows, skip ``install-mdanalysis`` for MDA ``latest``
+  only (``develop`` already uses pip via that action); fixes four matrix jobs.
 - GitHub Actions: ``reference-regression-tests`` runs all ``pytutorial_ref``
   and ``c_ref`` files on every PR/push (including HEWL); Codecov upload moved
   to the unit-test job (ubuntu / Python 3.12 / MDAnalysis latest only). (PR #12)
