@@ -22,6 +22,11 @@ The rules for this file:
 - @amruthesht
 
 ### Added
+- ``pypi-publish.yaml`` workflow: when a GitHub Release is published, build the
+  sdist/wheel and publish to TestPyPI then PyPI via Trusted Publishing.
+- Project URLs in package metadata.
+
+### Added
 - CI uploads ``c-ref-plots-*`` workflow artifacts (PNG comparisons from
   ``c_ref`` regression runs with ``--c-ref-plot``). (PR #12)
 
@@ -119,6 +124,9 @@ The rules for this file:
 
 ### Fixed
 <!-- Bug fixes -->
+- Wheel packaging: ``pyfresean*`` subpackages are now included (previously
+  only the top-level package matched); tests and reference data are excluded
+  from the wheel.
 
 ### Changed
 
