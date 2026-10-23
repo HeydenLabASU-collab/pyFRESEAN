@@ -23,14 +23,10 @@ The rules for this file:
 
 ### Added
 - ``pypi-publish.yaml`` workflow: when a GitHub Release is published, build the
-  sdist/wheel and publish to TestPyPI then PyPI via Trusted Publishing.
-- Project URLs in package metadata.
-
-### Added
+  sdist/wheel and publish to TestPyPI then PyPI via Trusted Publishing. (PR #13)
+- Project URLs in package metadata. (PR #13)
 - CI uploads ``c-ref-plots-*`` workflow artifacts (PNG comparisons from
   ``c_ref`` regression runs with ``--c-ref-plot``). (PR #12)
-
-### Added
 - :meth:`FRESEAN.run` ``compute_corr_matrix`` flag (default ``True``). With
   ``compute_vdos=True`` and ``compute_corr_matrix=False``, total VDOS is
   built from batched diagonal autocorrelation spectra (same lag/window
