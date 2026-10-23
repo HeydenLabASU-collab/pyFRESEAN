@@ -51,12 +51,24 @@ doc = [
     "sphinx_rtd_theme",
 ]
 
-# [project.urls]
-# source = "https://github.com/HeydenLabASU-collab/pyFRESEAN"
-# documentation = "https://pyfresean.readthedocs.io"
+[project.urls]
+Source = "https://github.com/HeydenLabASU-collab/pyFRESEAN"
+Documentation = "https://pyfresean.readthedocs.io"
+Issues = "https://github.com/HeydenLabASU-collab/pyFRESEAN/issues"
+Changelog = "https://github.com/HeydenLabASU-collab/pyFRESEAN/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
-include = ["pyfresean"]
+# "pyfresean*" so subpackages (analysis, coarsegrain, ...) are also shipped.
+# Tests and their reference data are excluded from the wheel.
+include = ["pyfresean*"]
+exclude = ["pyfresean.tests*"]
+
+[tool.setuptools]
+# Only ship the data files listed below (avoid tests data).
+include-package-data = false
+
+[tool.setuptools.package-data]
+"pyfresean.data" = ["*.txt"]
 
 [tool.pytest.ini_options]
 minversion = "6.0"

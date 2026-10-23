@@ -22,10 +22,11 @@ The rules for this file:
 - @amruthesht
 
 ### Added
+- ``pypi-publish.yaml`` workflow: when a GitHub Release is published, build the
+  sdist/wheel and publish to TestPyPI then PyPI via Trusted Publishing. (PR #13)
+- Project URLs in package metadata. (PR #13)
 - CI uploads ``c-ref-plots-*`` workflow artifacts (PNG comparisons from
   ``c_ref`` regression runs with ``--c-ref-plot``). (PR #12)
-
-### Added
 - :meth:`FRESEAN.run` ``compute_corr_matrix`` flag (default ``True``). With
   ``compute_vdos=True`` and ``compute_corr_matrix=False``, total VDOS is
   built from batched diagonal autocorrelation spectra (same lag/window
@@ -119,9 +120,15 @@ The rules for this file:
 
 ### Fixed
 <!-- Bug fixes -->
+- Wheel packaging: ``pyfresean*`` subpackages are now included (previously
+  only the top-level package matched); tests and reference data are excluded
+  from the wheel.
 
 ### Changed
 
+- GitHub Actions: pin Miniforge to ``26.7.2-0`` on Windows jobs only
+  (``setup-miniconda`` fails in ``conda init --all`` with Miniforge
+  ``26.9.4-0``); other OSes still use ``latest``. Unpin once fixed upstream.
 - Canonical repository:
   ``https://github.com/HeydenLabASU-collab/pyFRESEAN`` (formerly
   ``amruthesht/pyfresean``); README badges, CONTRIBUTING, and CI org guard
