@@ -126,6 +126,9 @@ The rules for this file:
 
 ### Changed
 
+- GitHub Actions: pin Miniforge to ``26.7.2-0`` on Windows jobs only
+  (``setup-miniconda`` fails in ``conda init --all`` with Miniforge
+  ``26.9.4-0``); other OSes still use ``latest``. Unpin once fixed upstream.
 - Canonical repository:
   ``https://github.com/HeydenLabASU-collab/pyFRESEAN`` (formerly
   ``amruthesht/pyfresean``); README badges, CONTRIBUTING, and CI org guard

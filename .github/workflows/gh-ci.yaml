@@ -51,7 +51,10 @@ jobs:
         environment-file: devtools/conda-envs/test_env.yaml
         add-pip-as-python-dependency: true
 
-        miniforge-version: "latest"
+        # Windows: Miniforge 26.9.4-0 fails in `conda init --all`
+        # ("needs sudo ... Scripts\conda.exe"); 26.7.2-0 worked.
+        # Unpin (back to "latest") once a fixed Miniforge is released.
+        miniforge-version: ${{ runner.os == 'Windows' && '26.7.2-0' || 'latest' }}
         use-mamba: true
         channels: conda-forge
 
