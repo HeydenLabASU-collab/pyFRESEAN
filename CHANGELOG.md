@@ -22,6 +22,10 @@ The rules for this file:
 - @amruthesht
 
 ### Added
+- Example notebook ``04_CG-hewl-solution-streaming``: stream raw solvated
+  ``run.tpr``/``run.trr`` with MDAnalysis ``Unwrap``, materialize an in-memory
+  CG universe, and run FRESEAN on CG only (no AA re-read / no
+  ``postprocess-prot.sh``). (PR #16)
 - ``pypi-publish.yaml`` workflow: when a GitHub Release is published, build the
   sdist/wheel and publish to TestPyPI then PyPI via Trusted Publishing. (PR #13)
 - Project URLs in package metadata. (PR #13)
