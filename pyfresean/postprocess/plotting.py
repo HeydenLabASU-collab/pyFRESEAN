@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from typing import Sequence
+from typing import TYPE_CHECKING, Sequence
 
-import matplotlib.pyplot as plt
 import numpy as np
 from scipy.interpolate import CubicSpline
+
+if TYPE_CHECKING:
+    import matplotlib.pyplot as plt
 
 
 def interpolate_spectrum(
@@ -39,6 +41,8 @@ def plot_spectra(
     legend: bool = True,
     **line_kwargs,
 ) -> plt.Axes:
+    import matplotlib.pyplot as plt  # pylint: disable=import-outside-toplevel
+
     if ax is None:
         _, ax = plt.subplots(figsize=(6, 4))
 
