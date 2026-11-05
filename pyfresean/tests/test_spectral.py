@@ -1,6 +1,8 @@
 import numpy as np
+import pytest
 
 from pyfresean.postprocess.spectral import (
+    cartesian_displacements,
     cluster_mode_indices,
     low_frequency_peaks,
     mode_overlap_matrix,
@@ -68,3 +70,32 @@ def test_clustering_helpers():
 
     overlap = mode_overlap_matrix(np.eye(3))
     np.testing.assert_allclose(overlap, np.eye(3))
+
+
+def test_cartesian_displacements_divides_by_sqrt_mass():
+    masses = np.array([1.0, 4.0, 16.0])
+    mode = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [2.0, 0.0, 0.0],
+            [4.0, 0.0, 0.0],
+        ]
+    )
+    got = cartesian_displacements(mode, masses)
+    expected = mode / np.sqrt(masses)[:, np.newaxis]
+    np.testing.assert_allclose(got, expected)
+
+
+def test_cartesian_displacements_accepts_bead_masses_and_flat_vector():
+    masses = np.array([14.0, 36.0])
+    flat = np.arange(6, dtype=np.float64)
+    got = cartesian_displacements(flat, masses, scale=10.0)
+    expected = 10.0 * flat.reshape(2, 3) / np.sqrt(masses)[:, np.newaxis]
+    np.testing.assert_allclose(got, expected)
+
+
+def test_cartesian_displacements_rejects_bad_input():
+    with pytest.raises(ValueError, match="positive"):
+        cartesian_displacements(np.ones((2, 3)), np.array([1.0, 0.0]))
+    with pytest.raises(ValueError, match="shape"):
+        cartesian_displacements(np.ones((3, 3)), np.array([1.0, 4.0]))

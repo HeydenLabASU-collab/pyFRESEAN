@@ -36,6 +36,9 @@ dynamic = [
 ]
 
 [project.optional-dependencies]
+plot = [
+    "matplotlib>=3.5",
+]
 test = [
     "pytest>=6.0",
     "pytest-xdist>=2.5",

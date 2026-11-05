@@ -8,6 +8,7 @@ from pyfresean.coarsegrain import (
     SUPPORTED_CG_METHODS,
 )
 from pyfresean.exceptions import MissingBeadMassWarning, TopologyFormatWarning
+from pyfresean.postprocess.spectral import cartesian_displacements
 
 
 def _make_protein_universe(n_frames: int = 2):
@@ -460,50 +461,6 @@ def test_backmap_guesses_missing_masses_from_atom_names():
     assert np.all(np.isfinite(aa_vectors))
 
 
-def test_scale_plumed_directions_formula():
-    u = _make_protein_universe()
-    cg = CoarseGrain.from_atomgroup(u.atoms)
-    masses = cg._atom_masses()
-    aa_vectors = np.arange(u.atoms.n_atoms * 3, dtype=np.float64).reshape(-1, 3)
-    scaled = cg.scale_plumed_directions(aa_vectors, scale=100.0)
-    expected = 100.0 * aa_vectors * np.sqrt(masses)[:, np.newaxis]
-    np.testing.assert_allclose(scaled, expected)
-
-
-def test_write_plumed_mode_input(tmp_path):
-    u = _make_protein_universe()
-    u.atoms.positions = np.arange(
-        u.atoms.n_atoms * 3, dtype=np.float32
-    ).reshape(-1, 3)
-    cg = CoarseGrain.from_atomgroup(u.atoms)
-    mode_a = np.ones((u.atoms.n_atoms, 3), dtype=np.float64)
-    mode_b = 2.0 * mode_a
-    out_path = tmp_path / "plumed-mode-input.pdb"
-
-    cg.write_plumed_mode_input([mode_a, mode_b], str(out_path))
-
-    text = out_path.read_text(encoding="utf-8")
-    assert text.count("REMARK TYPE=DIRECTION\n") == 2
-    assert text.count("REMARK TYPE=OPTIMAL\n") == 1
-    assert text.count("END\n") == 3
-    directions = cg.scale_plumed_directions(mode_a)
-    first_direction_line = (
-        f"{directions[0,0]:8.3f}{directions[0,1]:8.3f}{directions[0,2]:8.3f}"
-    )
-    assert first_direction_line in text
-
-
-def test_write_plumed_direction_pdb(tmp_path):
-    u = _make_protein_universe()
-    cg = CoarseGrain.from_atomgroup(u.atoms)
-    aa_vectors = np.ones((u.atoms.n_atoms, 3), dtype=np.float64)
-    out_path = tmp_path / "evec_1_aa_scaled.pdb"
-    cg.write_plumed_direction_pdb(aa_vectors, str(out_path))
-    text = out_path.read_text(encoding="utf-8")
-    assert text.startswith("REMARK TYPE=DIRECTION\n")
-    assert text.endswith("END\n")
-
-
 def test_backmap_mass_weighted_formula():
     u = _make_protein_universe()
     cg = CoarseGrain.from_atomgroup(u.atoms)
@@ -528,6 +485,14 @@ def test_backmap_mass_weighted_formula():
                 cg_vectors[bead_idx] / np.sqrt(bead_mass),
                 physical.shape,
             ),
+        )
+
+    aa_cartesian = cartesian_displacements(aa_vectors, masses)
+    cg_cartesian = cartesian_displacements(cg_vectors, cg.mapping.bead_masses)
+    for bead_idx, indices in enumerate(cg.mapping.atom_indices):
+        np.testing.assert_allclose(
+            aa_cartesian[indices],
+            np.broadcast_to(cg_cartesian[bead_idx], (len(indices), 3)),
         )
 
 

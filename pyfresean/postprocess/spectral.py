@@ -157,3 +157,48 @@ def sort_clusters_by_peak_frequency(
 
 def mode_overlap_matrix(modes: np.ndarray) -> np.ndarray:
     return np.abs(modes @ modes.T)
+
+
+def mode_components(
+    mode_vectors: np.ndarray,
+    masses: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return ``(n_particles, 3)`` components and a flat positive mass array."""
+    masses = np.asarray(masses, dtype=np.float64).reshape(-1)
+    if (
+        masses.size == 0
+        or not np.all(np.isfinite(masses))
+        or np.any(masses <= 0.0)
+    ):
+        raise ValueError("masses must be positive and finite")
+
+    vectors = np.asarray(mode_vectors, dtype=np.float64)
+    n_particles = int(masses.size)
+    if vectors.ndim == 1:
+        if vectors.size != n_particles * 3:
+            raise ValueError(
+                f"expected mode_vectors length {n_particles * 3} "
+                f"for {n_particles} masses, got {vectors.size}"
+            )
+        vectors = vectors.reshape(n_particles, 3)
+    elif vectors.shape != (n_particles, 3):
+        raise ValueError(
+            f"expected mode_vectors shape ({n_particles}, 3), "
+            f"got {vectors.shape}"
+        )
+    return vectors, masses
+
+
+def cartesian_displacements(
+    mode_vectors: np.ndarray,
+    masses: np.ndarray,
+    scale: float = 1.0,
+) -> np.ndarray:
+    """Mass-weighted mode components to Cartesian displacements.
+
+    ``u_i = sqrt(m_i) * d_i``, so ``d_i = scale * u_i / sqrt(m_i)``.
+    ``masses`` match the mode: atomic masses, or bead masses for a
+    coarse-grained mode. ``scale`` defaults to 1.
+    """
+    vectors, masses = mode_components(mode_vectors, masses)
+    return scale * vectors / np.sqrt(masses)[:, np.newaxis]

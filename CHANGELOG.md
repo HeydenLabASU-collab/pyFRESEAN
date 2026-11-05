@@ -22,6 +22,22 @@ The rules for this file:
 - @amruthesht
 
 ### Added
+- Optional ``plot`` extra (``matplotlib>=3.5``) for ``plot_spectra``. (PR #17)
+- ``cartesian_displacements`` (``postprocess.spectral``) and
+  ``plumed_directions`` (``postprocess.plumed``) turn mass-weighted
+  modes into Cartesian displacements or PLUMED ``DIRECTION`` vectors.
+  PLUMED writers take all-atom modes and warn on coarse-grained vectors.
+  ``write_plumed_projection_input`` writes the script that loads that
+  PDB and prints one projection per mode.
+  ``write_plumed_metad_input`` writes a well-tempered metadynamics
+  script. Widths are given per mode and the deposit interval defaults
+  to 1 ps.
+  ``projection_standard_deviations`` returns each PLUMED projection
+  standard deviation in nm, after the direction is normalized. The
+  HEWL example uses half of that as the metadynamics Gaussian width. (PR #17)
+- Example notebook ``02_AA_CG-hewl-solution-300K`` writes the PLUMED
+  mode PDB, projection script, and well-tempered metadynamics script
+  for coarse-grained modes 7 and 8. (PR #17)
 - Example notebook ``04_CG-hewl-solution-streaming``: stream raw solvated
   ``run.tpr``/``run.trr`` with MDAnalysis ``Unwrap``, materialize an in-memory
   CG universe, and run FRESEAN on CG only (no AA re-read / no
