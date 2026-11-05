@@ -12,11 +12,12 @@ from pyfresean.coarsegrain import (
     CoarseGrainMap,
     SUPPORTED_CG_METHODS,
 )
-from pyfresean.transformations import Align, Unwrap
+from pyfresean.transformations import Align, RemoveRigidVelocity, Unwrap
 
 __all__ = [
     "FRESEAN",
     "Align",
+    "RemoveRigidVelocity",
     "Unwrap",
     "CoarseGrain",
     "CoarseGrainMap",

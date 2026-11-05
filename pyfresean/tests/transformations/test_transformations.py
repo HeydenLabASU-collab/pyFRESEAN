@@ -3,8 +3,8 @@ import warnings
 import numpy as np
 import pytest
 
-from pyfresean.exceptions import MissingBoxWarning
-from pyfresean.transformations import Align, Unwrap
+from pyfresean.exceptions import MissingBoxWarning, MissingVelocityWarning
+from pyfresean.transformations import Align, RemoveRigidVelocity, Unwrap
 from pyfresean.tests.utils import make_Universe
 
 
@@ -66,6 +66,55 @@ def test_subtract_com_velocity():
     sel = u.atoms
     com_vel = np.average(sel.velocities, axis=0, weights=sel.masses)
     np.testing.assert_allclose(com_vel, 0, atol=1e-6)
+
+
+def _square_atoms():
+    universe = make_Universe(
+        extras=("masses",),
+        size=(4, 1, 1),
+        n_frames=1,
+        velocities=True,
+    )
+    universe.atoms.masses = np.ones(4)
+    universe.atoms.positions = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, -1.0, 0.0],
+        ]
+    )
+    return universe
+
+
+def test_remove_rigid_velocity_keeps_internal_motion():
+    universe = _square_atoms()
+    internal = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, -1.0, 0.0],
+        ]
+    )
+    omega = np.array([0.2, -0.4, 0.1])
+    v_com = np.array([0.3, 0.1, -0.2])
+    positions = universe.atoms.positions.copy()
+    universe.atoms.velocities = internal + v_com + np.cross(omega, positions)
+
+    RemoveRigidVelocity(universe.atoms)(universe.trajectory[0])
+
+    np.testing.assert_allclose(universe.atoms.positions, positions)
+    np.testing.assert_allclose(universe.atoms.velocities, internal, atol=1e-5)
+
+
+def test_remove_rigid_velocity_warns_without_velocities():
+    universe = make_Universe(extras=("masses",), size=(4, 1, 1), n_frames=1)
+    universe.atoms.masses = np.ones(4)
+    transform = RemoveRigidVelocity(universe.atoms)
+
+    with pytest.warns(MissingVelocityWarning, match="no velocities"):
+        transform(universe.trajectory[0])
 
 
 def test_add_transformations():

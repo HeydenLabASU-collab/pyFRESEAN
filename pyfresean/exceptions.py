@@ -6,6 +6,10 @@ class MissingBoxWarning(pyFRESEANWarning):
     """Trajectory frame has no periodic box dimensions."""
 
 
+class MissingVelocityWarning(pyFRESEANWarning):
+    """Trajectory frame has no velocities."""
+
+
 class MissingBeadMassWarning(pyFRESEANWarning):
     """CG bead masses were restored from the coarse-grain mapping."""
 
