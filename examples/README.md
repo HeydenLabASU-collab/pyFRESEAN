@@ -5,7 +5,7 @@ Example notebooks for FRESEAN analysis with the `pyfresean` package.
 | Notebook | System | What it covers |
 |---|---|---|
 | `01_AA-alanine-dipeptide-gas-300K.ipynb` | Alanine dipeptide, all-atom, gas, 300 K | Align, FRESEAN, total VDoS, per-mode VDoS (modes 1 & 2) |
-| `02_AA_CG-hewl-solution-300K.ipynb` | HEWL, all-atom + coarse-grained, solution, 300 K | CG mapping, FRESEAN on AA and CG, total VDoS overlay, per-mode VDoS (modes 7 & 8); uses protein-only postprocessed TRR |
+| `02_AA_CG-hewl-solution-300K.ipynb` | HEWL, all-atom + coarse-grained, solution, 300 K | CG mapping, FRESEAN on AA and CG, total VDoS overlay, per-mode VDoS (modes 1 & 2); uses protein-only postprocessed TRR |
 | `03_CG-hewl-fresean-parallel-benchmark.ipynb` | HEWL, CG only, solution, 300 K | CPU detection, serial vs per-phase `parallel=` settings, `benchmark=True` timings, and summary table |
 | `04_CG-hewl-solution-streaming.ipynb` | HEWL, CG only, solution, 300 K | Stream raw solvated `run.tpr`/`run.trr` with MDAnalysis `Unwrap`, build in-memory CG, FRESEAN on CG (no postprocess / no AA FRESEAN) |
 

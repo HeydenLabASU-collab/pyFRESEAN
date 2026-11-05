@@ -22,6 +22,10 @@ The rules for this file:
 - @amruthesht
 
 ### Added
+- ``RemoveRigidVelocity`` subtracts center-of-mass translation and
+  rotation from the selected atoms' velocities. The rotation uses the
+  inertia tensor about the center of mass. Coordinates are unchanged.
+  The solution example notebooks apply it after ``Align``. (PR #18)
 - Optional ``plot`` extra (``matplotlib>=3.5``) for ``plot_spectra``. (PR #17)
 - ``cartesian_displacements`` (``postprocess.spectral``) and
   ``plumed_directions`` (``postprocess.plumed``) turn mass-weighted
