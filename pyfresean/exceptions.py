@@ -12,3 +12,7 @@ class MissingBeadMassWarning(pyFRESEANWarning):
 
 class TopologyFormatWarning(pyFRESEANWarning):
     """Topology file format may not preserve bead masses on reload."""
+
+
+class PlumedAllAtomWarning(pyFRESEANWarning):
+    """A PLUMED DIRECTION file was given coarse-grained mode vectors."""

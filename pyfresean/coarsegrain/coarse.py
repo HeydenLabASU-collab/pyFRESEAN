@@ -1569,18 +1569,21 @@ class CoarseGrain:
         )
 
     def backmap_modes(self, cg_vectors: np.ndarray) -> np.ndarray:
-        """Distribute CG mode vectors onto all-atom coordinates.
+        """Expand a coarse-grained mass-weighted mode onto atoms.
 
-        Each bead eigenvector component ``u_b`` (in sqrt(M_b)*V space) is
-        expanded onto atoms as ``u_i = u_b * sqrt(m_i / M_b)``. Velocities are
-        uniform within a bead: ``u_i / sqrt(m_i) = u_b / sqrt(M_b)``.
+        ``cg_vectors`` use the same scaling as FRESEAN eigenvectors. Bead
+        component ``u_b`` is ``sqrt(M_b)`` times that bead's Cartesian
+        direction. Atom ``i`` receives ``u_i = u_b * sqrt(m_i / M_b)``,
+        which keeps that scaling and gives every atom in the bead the
+        same Cartesian direction.
         """
         mapping = self._ensure_mapping()
         if cg_vectors.ndim == 1:
             cg_vectors = cg_vectors.reshape(mapping.n_beads, 3)
         if cg_vectors.shape != (mapping.n_beads, 3):
             raise ValueError(
-                f"expected cg_vectors shape ({mapping.n_beads}, 3), got {cg_vectors.shape}"
+                f"expected cg_vectors shape ({mapping.n_beads}, 3), "
+                f"got {cg_vectors.shape}"
             )
 
         masses = self._atom_masses()
@@ -1592,100 +1595,6 @@ class CoarseGrain:
             bead_mass = float(np.sum(masses[indices]))
             if bead_mass <= 0.0:
                 raise ValueError(f"bead {bead_idx} has non-positive total mass")
-            scale = np.sqrt(masses[indices] / bead_mass)[:, np.newaxis]
-            aa_vectors[indices] = cg_vectors[bead_idx] * scale
+            weights = np.sqrt(masses[indices] / bead_mass)[:, np.newaxis]
+            aa_vectors[indices] = cg_vectors[bead_idx] * weights
         return aa_vectors
-
-    def scale_plumed_directions(
-        self,
-        aa_vectors: np.ndarray,
-        scale: float = 100.0,
-    ) -> np.ndarray:
-        """Scale back-mapped mode vectors for PLUMED ``DIRECTION`` PDBs.
-
-        Uses ``scale * aa_vectors * sqrt(masses)``.
-        """
-        aa_vectors = np.asarray(aa_vectors, dtype=np.float64)
-        n_atoms = self.atomgroup.n_atoms
-        if aa_vectors.ndim == 1:
-            aa_vectors = aa_vectors.reshape(n_atoms, 3)
-        if aa_vectors.shape != (n_atoms, 3):
-            raise ValueError(
-                f"expected aa_vectors shape ({n_atoms}, 3), got {aa_vectors.shape}"
-            )
-
-        masses = self._atom_masses()
-        return scale * aa_vectors * np.sqrt(masses)[:, np.newaxis]
-
-    @staticmethod
-    def _pdb_record_name(atom) -> str:
-        if hasattr(atom, "record_type"):
-            return str(atom.record_type)
-        return "ATOM"
-
-    @staticmethod
-    def _pdb_chain_id(atom) -> str:
-        if hasattr(atom, "chainID") and atom.chainID not in (None, ""):
-            return str(atom.chainID)[:1]
-        if hasattr(atom, "segid") and atom.segid not in (None, ""):
-            return str(atom.segid)[:1]
-        return " "
-
-    def _format_pdb_atom_line(
-        self,
-        atom,
-        coords: Sequence[float],
-    ) -> str:
-        x, y, z = coords
-        return (
-            f"{self._pdb_record_name(atom):<6}{int(atom.index) + 1:5d} "
-            f"{atom.name:>4s} {atom.resname:>3s}{self._pdb_chain_id(atom):1s}"
-            f"{int(atom.resid):4d}    {float(x):8.3f}{float(y):8.3f}{float(z):8.3f}"
-            f"  1.00  0.00\n"
-        )
-
-    def write_plumed_direction_pdb(
-        self,
-        aa_vectors: np.ndarray,
-        path: str,
-        scale: float = 100.0,
-    ) -> None:
-        """Write one PLUMED ``DIRECTION`` PDB for a back-mapped all-atom mode."""
-        directions = self.scale_plumed_directions(aa_vectors, scale=scale)
-        with open(path, "w", encoding="utf-8") as writer:
-            writer.write("REMARK TYPE=DIRECTION\n")
-            for atom, coords in zip(self.atomgroup, directions):
-                writer.write(self._format_pdb_atom_line(atom, coords))
-            writer.write("END\n")
-
-    def write_plumed_mode_input(
-        self,
-        aa_modes: Sequence[np.ndarray],
-        path: str,
-        scale: float = 100.0,
-        include_reference: bool = True,
-    ) -> None:
-        """Write a combined PLUMED reference + mode ``DIRECTION`` PDB.
-
-        Same layout as ``ref.pdb`` followed by one ``evec_*_aa_scaled.pdb`` per mode.
-        """
-        if len(aa_modes) == 0:
-            raise ValueError("aa_modes must contain at least one mode")
-
-        with open(path, "w", encoding="utf-8") as writer:
-            if include_reference:
-                writer.write("REMARK TYPE=OPTIMAL\n")
-                for atom in self.atomgroup:
-                    writer.write(
-                        self._format_pdb_atom_line(atom, atom.position)
-                    )
-                writer.write("END\n")
-
-            for aa_vectors in aa_modes:
-                directions = self.scale_plumed_directions(
-                    aa_vectors, scale=scale
-                )
-                writer.write("REMARK TYPE=DIRECTION\n")
-                for atom, coords in zip(self.atomgroup, directions):
-                    writer.write(self._format_pdb_atom_line(atom, coords))
-                writer.write("END\n")
