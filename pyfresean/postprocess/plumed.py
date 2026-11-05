@@ -1,4 +1,4 @@
-"""PLUMED DIRECTION vectors, the mode PDB, and the projection script."""
+"""PLUMED DIRECTION vectors, the mode PDB, and PLUMED scripts."""
 
 from __future__ import annotations
 
@@ -9,6 +9,9 @@ import numpy as np
 
 from pyfresean.exceptions import PlumedAllAtomWarning
 from pyfresean.postprocess.spectral import mode_components
+
+# PLUMED reads PDB coordinates as angstroms and converts them to nm.
+_ANGSTROM_TO_NM = 0.1
 
 _AA_MODE_MESSAGE = (
     "PLUMED directions are for all-atom coordinates. This mode length "
@@ -110,6 +113,86 @@ def write_plumed_mode_input(
             _write_model(writer, atomgroup, "DIRECTION", mode_directions)
 
 
+def _position_frames(positions: np.ndarray) -> np.ndarray:
+    frames = np.asarray(positions, dtype=np.float64)
+    if frames.ndim == 3 and frames.shape[-1] == 3 and frames.shape[1] > 0:
+        return frames
+    if frames.ndim == 2 and frames.shape[-1] % 3 == 0 and frames.shape[-1] > 0:
+        n_atoms = frames.shape[-1] // 3
+        return frames.reshape(frames.shape[0], n_atoms, 3)
+    raise ValueError("positions must have shape (n_frames, n_atoms, 3)")
+
+
+def _reference_frame(reference: np.ndarray, n_atoms: int) -> np.ndarray:
+    frame = np.asarray(reference, dtype=np.float64)
+    if frame.shape == (n_atoms, 3):
+        return frame
+    if frame.shape == (n_atoms * 3,):
+        return frame.reshape(n_atoms, 3)
+    raise ValueError(f"reference must have shape ({n_atoms}, 3)")
+
+
+def _mode_stack(mode_vectors: np.ndarray, n_atoms: int) -> np.ndarray:
+    modes = np.asarray(mode_vectors, dtype=np.float64)
+    if modes.ndim == 1:
+        modes = modes.reshape(1, -1)
+    if modes.shape[0] == 0:
+        raise ValueError("mode_vectors must contain at least one mode")
+    if modes.ndim == 3 and modes.shape[1:] == (n_atoms, 3):
+        return modes
+    if modes.ndim == 2 and modes.shape == (n_atoms, 3):
+        return modes.reshape(1, n_atoms, 3)
+    if modes.ndim == 2 and modes.shape[-1] == n_atoms * 3:
+        return modes.reshape(modes.shape[0], n_atoms, 3)
+    raise ValueError(f"mode_vectors must describe modes of {n_atoms} atoms")
+
+
+def projection_standard_deviations(
+    positions: np.ndarray,
+    mode_vectors: np.ndarray,
+    masses: np.ndarray,
+    reference: np.ndarray,
+    *,
+    scale: float = 100.0,
+) -> np.ndarray:
+    """Standard deviation of each PLUMED mode projection, in nm.
+
+    Displacements from ``reference`` are projected with the direction
+    weights ``A_i = scale * u_i * sqrt(m_i)``. ``positions`` and
+    ``reference`` are MDAnalysis coordinates in angstroms, already in
+    one aligned frame. PLUMED converts the displacements to nanometres
+    and normalizes each ``DIRECTION``, so these values match
+    ``plumed driver``. The protocol uses half of each value as
+    ``SIGMA``. ``scale`` must match the mode PDB.
+    """
+    frames = _position_frames(positions)
+    if frames.shape[0] == 0:
+        raise ValueError("positions must contain at least one frame")
+    n_atoms = int(frames.shape[1])
+    masses = np.asarray(masses, dtype=np.float64).reshape(-1)
+    if masses.size != n_atoms:
+        raise ValueError("masses length must match the number of atoms")
+    origin = _reference_frame(reference, n_atoms)
+    modes = _mode_stack(mode_vectors, n_atoms)
+    directions = np.stack(
+        [
+            plumed_directions(mode, masses, scale=scale, n_atoms=n_atoms)
+            for mode in modes
+        ]
+    )
+    lengths = np.linalg.norm(directions, axis=(1, 2))
+    if not np.all(np.isfinite(lengths)) or np.any(lengths == 0.0):
+        raise ValueError("directions must be finite and nonzero")
+    projections = np.einsum(
+        "mai,fai->fm",
+        directions / lengths[:, None, None],
+        (frames - origin) * _ANGSTROM_TO_NM,
+    )
+    if not np.all(np.isfinite(projections)):
+        raise ValueError("projections must be finite")
+    return np.std(projections, axis=0)
+
+
 def write_plumed_projection_input(
     path: str,
     n_modes: int,
@@ -133,6 +216,76 @@ def write_plumed_projection_input(
         "\n"
         "# Print the displacement projections\n"
         f"PRINT ARG={components} FILE={output} STRIDE={stride}\n"
+    )
+    with open(path, "w", encoding="utf-8") as writer:
+        writer.write(text)
+
+
+def _deposition_steps(timestep: float, deposition: float) -> int:
+    """Timesteps between Gaussians. Both times are in picoseconds."""
+    if timestep <= 0.0 or deposition <= 0.0:
+        raise ValueError("timestep and deposition must be positive")
+    steps = deposition / timestep
+    pace = int(round(steps))
+    if pace < 1 or abs(steps - pace) > 1e-6 * max(1.0, abs(steps)):
+        raise ValueError("deposition must be a whole number of timesteps")
+    return pace
+
+
+def write_plumed_metad_input(  # pylint: disable=too-many-arguments
+    path: str,
+    sigmas: Sequence[float],
+    *,
+    timestep: float = 0.002,
+    deposition: float = 1.0,
+    height: float = 0.1,
+    biasfactor: float = 10.0,
+    temperature: float = 300.0,
+    reference: str = "plumed-mode-input.pdb",
+    hills: str = "plumed-mode-metadyn.hills",
+    output: str = "plumed-mode-metadyn.out",
+) -> None:
+    """Write a well-tempered metadynamics script on the mode projections.
+
+    ``sigmas`` is one positive Gaussian width per mode. The FRESEAN
+    protocol uses half of ``projection_standard_deviations``.
+    ``timestep`` and ``deposition`` are in picoseconds. ``PACE`` is
+    ``deposition / timestep`` and defaults to 1 ps. Pass a longer
+    deposition when the collective variable autocorrelation decays
+    more slowly.
+
+    Height, bias factor, and temperature default to 0.1 kJ/mol, 10,
+    and 300 K.
+    """
+    widths = [float(value) for value in sigmas]
+    if not widths or any(not np.isfinite(value) or value <= 0.0 for value in widths):
+        raise ValueError("sigmas must be positive and finite")
+    if not np.isfinite(height) or height <= 0.0:
+        raise ValueError("height must be positive and finite")
+    if not np.isfinite(biasfactor) or biasfactor < 1.0:
+        raise ValueError("biasfactor must be at least 1")
+    if not np.isfinite(temperature) or temperature <= 0.0:
+        raise ValueError("temperature must be positive and finite")
+
+    pace = _deposition_steps(timestep, deposition)
+    arguments = ",".join(f"pca.eig-{index}" for index in range(1, len(widths) + 1))
+    text = (
+        f"PCAVARS REFERENCE={reference} TYPE=OPTIMAL LABEL=pca\n"
+        "\n"
+        "METAD ...\n"
+        "LABEL=metad\n"
+        f"ARG={arguments}\n"
+        f"PACE={pace}\n"
+        f"HEIGHT={height:.12g}\n"
+        f"BIASFACTOR={biasfactor:.12g}\n"
+        f"SIGMA={','.join(f'{value:.12g}' for value in widths)}\n"
+        f"FILE={hills}\n"
+        f"TEMP={temperature:.12g}\n"
+        "... METAD\n"
+        "\n"
+        "# monitor the two variables and the metadynamics bias potential\n"
+        f"PRINT ARG={arguments},pca.residual,metad.bias "
+        f"FILE={output} STRIDE={pace}\n"
     )
     with open(path, "w", encoding="utf-8") as writer:
         writer.write(text)

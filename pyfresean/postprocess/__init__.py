@@ -1,5 +1,7 @@
 from pyfresean.postprocess.plumed import (
     plumed_directions,
+    projection_standard_deviations,
+    write_plumed_metad_input,
     write_plumed_mode_input,
     write_plumed_projection_input,
 )
@@ -26,9 +28,11 @@ __all__ = [
     "mode_time_correlation",
     "plot_spectra",
     "plumed_directions",
+    "projection_standard_deviations",
     "select_modes_in_frequency_range",
     "sort_clusters_by_peak_frequency",
     "weighted_similarity_matrix",
+    "write_plumed_metad_input",
     "write_plumed_mode_input",
     "write_plumed_projection_input",
 ]

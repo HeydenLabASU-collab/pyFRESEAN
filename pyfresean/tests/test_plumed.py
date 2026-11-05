@@ -7,6 +7,8 @@ from pyfresean.coarsegrain import CoarseGrain
 from pyfresean.exceptions import PlumedAllAtomWarning
 from pyfresean.postprocess.plumed import (
     plumed_directions,
+    projection_standard_deviations,
+    write_plumed_metad_input,
     write_plumed_mode_input,
     write_plumed_projection_input,
 )
@@ -89,6 +91,45 @@ def test_write_plumed_direction_only(tmp_path):
     assert first_line in text
 
 
+def test_projection_standard_deviations():
+    masses = np.array([4.0, 9.0])
+    reference = np.zeros((2, 3))
+    frames = np.zeros((3, 2, 3))
+    frames[1, 0, 0] = 1.0
+    frames[2, 0, 0] = 3.0
+    frames[:, 1, 2] = [0.0, 1.0, 1.0]
+    mode_a = np.zeros((2, 3))
+    mode_a[0, 0] = 1.0
+    mode_b = np.zeros((2, 3))
+    mode_b[1, 2] = 1.0
+    # PLUMED normalizes each DIRECTION, then dots it with dx in nm.
+    expected = [
+        np.std([0.0, 0.1, 0.3]),
+        np.std([0.0, 0.1, 0.1]),
+    ]
+
+    got = projection_standard_deviations(
+        frames, [mode_a, mode_b], masses, reference
+    )
+    np.testing.assert_allclose(got, expected)
+
+    flat = projection_standard_deviations(
+        frames.reshape(3, -1),
+        np.stack([mode_a.reshape(-1), mode_b.reshape(-1)]),
+        masses,
+        reference.reshape(-1),
+        scale=1.0,
+    )
+    np.testing.assert_allclose(flat, expected)
+
+    with pytest.raises(ValueError, match="masses"):
+        projection_standard_deviations(
+            frames, [mode_a], np.array([4.0]), reference
+        )
+    with pytest.raises(ValueError, match="frame"):
+        projection_standard_deviations(frames[:0], [mode_a], masses, reference)
+
+
 def test_write_plumed_projection_input(tmp_path):
     out_path = tmp_path / "plumed-mode-projection.dat"
     write_plumed_projection_input(str(out_path), 2)
@@ -116,6 +157,58 @@ def test_write_plumed_projection_input(tmp_path):
 
     with pytest.raises(ValueError, match="n_modes"):
         write_plumed_projection_input(str(tmp_path / "empty.dat"), 0)
+
+
+def test_write_plumed_metad_input(tmp_path):
+    out_path = tmp_path / "plumed-mode-metadyn.dat"
+    write_plumed_metad_input(str(out_path), [0.001, 0.001])
+    text = out_path.read_text(encoding="utf-8")
+    assert "PCAVARS REFERENCE=plumed-mode-input.pdb TYPE=OPTIMAL LABEL=pca\n" in text
+    assert "ARG=pca.eig-1,pca.eig-2\n" in text
+    assert "PACE=500\n" in text
+    assert "HEIGHT=0.1\n" in text
+    assert "BIASFACTOR=10\n" in text
+    assert "SIGMA=0.001,0.001\n" in text
+    assert "FILE=plumed-mode-metadyn.hills\n" in text
+    assert "TEMP=300\n" in text
+    assert (
+        "PRINT ARG=pca.eig-1,pca.eig-2,pca.residual,metad.bias "
+        "FILE=plumed-mode-metadyn.out STRIDE=500\n"
+    ) in text
+
+    custom = tmp_path / "custom-metad.dat"
+    write_plumed_metad_input(
+        str(custom),
+        [0.02],
+        timestep=0.001,
+        deposition=2.0,
+        height=1.0,
+        biasfactor=15.0,
+        temperature=310.0,
+        reference="modes.pdb",
+        hills="hills.dat",
+        output="metad.out",
+    )
+    custom_text = custom.read_text(encoding="utf-8")
+    assert "PCAVARS REFERENCE=modes.pdb TYPE=OPTIMAL LABEL=pca\n" in custom_text
+    assert "ARG=pca.eig-1\n" in custom_text
+    assert "PACE=2000\n" in custom_text
+    assert "HEIGHT=1\n" in custom_text
+    assert "BIASFACTOR=15\n" in custom_text
+    assert "SIGMA=0.02\n" in custom_text
+    assert "TEMP=310\n" in custom_text
+    assert "FILE=hills.dat\n" in custom_text
+    assert "FILE=metad.out STRIDE=2000\n" in custom_text
+
+    with pytest.raises(ValueError, match="sigmas"):
+        write_plumed_metad_input(str(tmp_path / "empty.dat"), [])
+    with pytest.raises(ValueError, match="deposition"):
+        write_plumed_metad_input(
+            str(tmp_path / "pace.dat"),
+            [0.001],
+            timestep=0.002,
+            deposition=0.003,
+        )
 
 
 def test_write_plumed_mode_input_warns_for_bead_vectors(tmp_path):
