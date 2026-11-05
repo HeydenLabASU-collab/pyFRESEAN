@@ -27,6 +27,7 @@ import numpy as np
 from MDAnalysis.analysis.backends import BackendBase, BackendSerial
 
 LagSymmetrization = Literal["mirror", "average"]
+SymmetryLabel = Literal["C3", "C6", "c3", "c6"]
 
 from MDAnalysis.analysis.base import AnalysisBase, Results
 from MDAnalysis.analysis.results import ResultsGroup
@@ -41,6 +42,13 @@ from pyfresean.benchmark_keys import (
     finalize_fresean_benchmark,
     new_fresean_benchmark_timings,
 )
+from pyfresean.analysis.symmetry import (
+    SymmetryBasis,
+    build_symmetry_basis,
+    diagonalize_corr_with_symmetry,
+    symmetry_order_from_label,
+)
+from pyfresean.analysis.symmetry.groups import resolve_partner_map
 from pyfresean.parallel import (
     PhaseParallelism,
     blas_thread_context,
@@ -100,6 +108,14 @@ class FRESEAN(AnalysisBase):
         negative-lag bin from :func:`scipy.fft.ifft`), then mirror for the
         second half. The latter is more appropriate for cross-correlations on
         finite trajectories.
+    symmetry: "C3", "C6", or None
+        If set, mode diagonalization uses a symmetry-adapted basis built from
+        ``symmetry_groups`` only (cyclic copy permutation on lab x, y, z).
+        Trajectory processing and the correlation matrix are unchanged; only
+        the eigen step after ``corr_matrix`` is transformed.
+    symmetry_groups: sequence of AtomGroups
+        ``order`` groups (3 or 6) partitioning the analysis selection, with
+        matching atom order in each copy.
     parallel: dict or None
         Optional per-phase threading for :meth:`_conclude`. Keys are
         ``velocity_fft``, ``corr_matrix``, and ``eigen``. Each value is a dict
@@ -330,6 +346,8 @@ class FRESEAN(AnalysisBase):
         sigma: float = 10.0,
         lag_symmetrization: LagSymmetrization = "mirror",
         parallel: Optional[Mapping[str, Mapping[str, int]]] = None,
+        symmetry: Optional[SymmetryLabel] = None,
+        symmetry_groups: Optional[Sequence] = None,
         **kwargs,
     ):
         # the below line must be kept to initialize the AnalysisBase class!
@@ -357,6 +375,16 @@ class FRESEAN(AnalysisBase):
         self._run_plan: Optional[_FreseanRunPlan] = None
         self._mode_freqs_req: Optional[Sequence[float]] = None
         self._vdos_freqs_req: Optional[Sequence[float]] = None
+        self.symmetry = symmetry
+        self.symmetry_groups = symmetry_groups
+        self._symmetry_basis: Optional[SymmetryBasis] = None
+        if symmetry is not None:
+            if symmetry_groups is None:
+                raise ValueError(
+                    "symmetry_groups is required when symmetry is set"
+                )
+            order = symmetry_order_from_label(symmetry)
+            resolve_partner_map(self.atomgroup, symmetry_groups, order)
 
     @staticmethod
     def _frequency_grid(n_corr: int, dt: float) -> np.ndarray:
@@ -655,12 +683,32 @@ class FRESEAN(AnalysisBase):
                     diag[:, i0:i1] = block
             return diag
 
+    def _ensure_symmetry_basis(self) -> None:
+        if self.symmetry is None or self._symmetry_basis is not None:
+            return
+        self._symmetry_basis = build_symmetry_basis(
+            self.atomgroup,
+            self.symmetry,
+            self.symmetry_groups,
+        )
+
     def _diagonalize_corr_matrix(
         self,
         corr_matrix: np.ndarray,
         freq_indices: np.ndarray,
         n_elements: int,
     ) -> tuple[np.ndarray, np.ndarray]:
+        self._ensure_symmetry_basis()
+        if self._symmetry_basis is not None:
+            spec = self._phase_parallel("eigen")
+            return diagonalize_corr_with_symmetry(
+                corr_matrix,
+                freq_indices,
+                self._symmetry_basis,
+                n_elements,
+                n_jobs=spec.n_jobs,
+                omp_threads=spec.omp_threads,
+            )
         n_bins = int(freq_indices.size)
         eigenvalues = np.empty((n_bins, n_elements), dtype=np.float64)
         eigenvectors = np.empty(
@@ -719,6 +767,7 @@ class FRESEAN(AnalysisBase):
         """Set things up before the analysis loop begins"""
         self._init_run_metadata()
         self._init_results_arrays()
+        self._symmetry_basis = None
 
     def _single_frame(self):
         """Calculate data from a single frame of trajectory"""
