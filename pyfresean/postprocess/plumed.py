@@ -283,7 +283,7 @@ def write_plumed_metad_input(  # pylint: disable=too-many-arguments
         f"TEMP={temperature:.12g}\n"
         "... METAD\n"
         "\n"
-        "# monitor the two variables and the metadynamics bias potential\n"
+        "# monitor the projections and the metadynamics bias potential\n"
         f"PRINT ARG={arguments},pca.residual,metad.bias "
         f"FILE={output} STRIDE={pace}\n"
     )
