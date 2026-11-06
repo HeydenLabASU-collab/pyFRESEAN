@@ -17,6 +17,11 @@ from pyfresean.postprocess.spectral import (
     sort_clusters_by_peak_frequency,
     weighted_similarity_matrix,
 )
+from pyfresean.postprocess.visualization import (
+    oscillation_frames,
+    scale_to_max_length,
+    visualize_mode_displacement,
+)
 
 __all__ = [
     "cartesian_displacements",
@@ -26,12 +31,15 @@ __all__ = [
     "mode_overlap_matrix",
     "mode_spectra",
     "mode_time_correlation",
+    "oscillation_frames",
     "plot_spectra",
     "plumed_directions",
     "projection_standard_deviations",
+    "scale_to_max_length",
     "select_modes_in_frequency_range",
     "sort_clusters_by_peak_frequency",
     "weighted_similarity_matrix",
+    "visualize_mode_displacement",
     "write_plumed_metad_input",
     "write_plumed_mode_input",
     "write_plumed_projection_input",

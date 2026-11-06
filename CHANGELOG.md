@@ -22,6 +22,12 @@ The rules for this file:
 - @amruthesht
 
 ### Added
+- ``visualize_mode_displacement`` draws a Cartesian mode in py3Dmol,
+  with arrows along the displacement and a one-period vibration.
+  ``oscillation_frames`` builds the vibration coordinates. ``d``
+  comes from ``cartesian_displacements``. Styles are ``cartoon``,
+  ``stick``, and ``cartoon+stick``. The optional ``visualization``
+  extra installs ``py3Dmol``. Notebook 01 and Notebook 02 draw backmapped CG modes 1 and 2 as arrows and displacements at the bead centers on visualized protein. (PR #19)
 - ``RemoveRigidVelocity`` subtracts center-of-mass translation and
   rotation from the selected atoms' velocities. The rotation uses the
   inertia tensor about the center of mass. Coordinates are unchanged.
