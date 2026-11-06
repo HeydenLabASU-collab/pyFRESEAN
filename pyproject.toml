@@ -39,6 +39,9 @@ dynamic = [
 plot = [
     "matplotlib>=3.5",
 ]
+visualization = [
+    "py3Dmol>=2.0",
+]
 test = [
     "pytest>=6.0",
     "pytest-xdist>=2.5",
@@ -47,6 +50,7 @@ test = [
 ]
 examples = [
     "matplotlib>=3.5",
+    "py3Dmol>=2.0",
     "tqdm>=4.0",
 ]
 doc = [
