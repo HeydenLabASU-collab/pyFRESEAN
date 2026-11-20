@@ -23,7 +23,6 @@ class Align(TransformationBase):
         subtract_com_velocity: bool = False,
         place_com_in_box: bool = True,
         rotate: bool = True,
-        rotate_velocities: bool = True,
         max_threads: int = 1,
         parallelizable: bool = True,
     ):
@@ -36,7 +35,6 @@ class Align(TransformationBase):
         self.subtract_com_velocity = subtract_com_velocity
         self.place_com_in_box = place_com_in_box
         self.rotate = rotate
-        self.rotate_velocities = rotate_velocities
         self._missing_box_warned = False
 
     def _ensure_box(self) -> None:
@@ -81,20 +79,17 @@ class Align(TransformationBase):
         else:
             rot = np.identity(3)
 
+        # AtomGroup.rotate() applies the Kabsch matrix to coordinates and,
+        # since MDAnalysis 2.11, to velocities and forces. 
         if self.center_com:
             u.atoms.translate(-sel_com)
             if self.rotate:
                 u.atoms.rotate(rot)
             u.atoms.translate(ref_com)
         elif self.rotate:
-            u.atoms.positions = (
-                np.dot(u.atoms.positions - sel_com, rot.T) + sel_com
-            )
+            u.atoms.rotate(rot, point=sel_com)
 
         ts = u.trajectory.ts
-        if self.rotate_velocities and self.rotate and ts.has_velocities:
-            u.atoms.velocities = np.dot(u.atoms.velocities, rot.T)
-
         if self.subtract_com_velocity and ts.has_velocities:
             com_vel = np.average(sel.velocities, axis=0, weights=weights)
             u.atoms.velocities -= com_vel

@@ -2,6 +2,7 @@ import warnings
 
 import numpy as np
 import pytest
+from MDAnalysis.analysis.align import rotation_matrix
 
 from pyfresean.exceptions import MissingBoxWarning, MissingVelocityWarning
 from pyfresean.transformations import Align, RemoveRigidVelocity, Unwrap
@@ -43,6 +44,75 @@ def test_unwrap_warns_and_skips_without_box():
         ts = unwrap(u.trajectory[0])
 
     assert ts is u.trajectory[0]
+
+
+@pytest.mark.parametrize("center_com", [True, False])
+def test_align_rotates_velocities_and_forces_once(center_com):
+    """Kabsch fit rotates velocities and forces once, via MDAnalysis."""
+    positions = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [-1.0, 0.0, 0.0],
+            [0.0, -1.0, 0.0],
+        ]
+    )
+    # +90 degrees about z: (x, y, z) -> (-y, x, z), applied once.
+    reference = np.array(
+        [
+            [0.0, 1.0, 0.0],
+            [-1.0, 0.0, 0.0],
+            [0.0, -1.0, 0.0],
+            [1.0, 0.0, 0.0],
+        ]
+    )
+    vectors = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [0.0, 2.0, 0.0],
+            [0.0, 0.0, 3.0],
+            [0.5, -0.5, 0.25],
+        ]
+    )
+    shift = np.array([10.0, 20.0, 30.0])
+    mobile = positions + shift
+    target = reference + shift
+    weights = np.ones(4)
+    rot, _ = rotation_matrix(
+        mobile - mobile.mean(axis=0),
+        target - target.mean(axis=0),
+        weights=weights,
+    )
+    # One application of the Kabsch matrix. A second pass is rot.T @ rot.T.
+    expected_vectors = vectors @ rot.T
+    universe = make_Universe(
+        extras=("masses",),
+        size=(4, 1, 1),
+        n_frames=1,
+        velocities=True,
+        forces=True,
+    )
+    universe.atoms.masses = np.ones(4)
+    universe.atoms.positions = positions + shift
+    universe.atoms.velocities = vectors.copy()
+    universe.atoms.forces = vectors.copy()
+
+    Align(
+        universe.atoms,
+        reference_positions=reference + shift,
+        place_com_in_box=False,
+        center_com=center_com,
+    )(universe.trajectory[0])
+
+    np.testing.assert_allclose(
+        universe.atoms.positions, reference + shift, atol=1e-6
+    )
+    np.testing.assert_allclose(
+        universe.atoms.velocities, expected_vectors, atol=1e-6
+    )
+    np.testing.assert_allclose(
+        universe.atoms.forces, expected_vectors, atol=1e-6
+    )
 
 
 def test_align_superimposes_translated_copy():
