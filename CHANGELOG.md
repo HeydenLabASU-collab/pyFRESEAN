@@ -25,7 +25,7 @@ The rules for this file:
   applied the matrix twice. The ``rotate_velocities`` argument is
   removed. When centering is off, alignment now goes through
   ``AtomGroup.rotate()`` as well. Requires MDAnalysis >= 2.11.0,
-  NumPy >= 1.26.0, and Python >= 3.11.
+  NumPy >= 1.26.0, and Python >= 3.11. (PR #23)
 
 ## [0.1.0] - 2026-11-05
 
