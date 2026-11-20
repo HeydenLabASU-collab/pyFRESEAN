@@ -18,6 +18,15 @@ The rules for this file:
 
 ## [Unreleased]
 
+### Changed
+- ``Align`` no longer rotates velocities after the Kabsch fit.
+  ``AtomGroup.rotate()`` in MDAnalysis 2.11.0 and later rotates
+  velocities and forces with the coordinates, so a second rotation
+  applied the matrix twice. The ``rotate_velocities`` argument is
+  removed. When centering is off, alignment now goes through
+  ``AtomGroup.rotate()`` as well. Requires MDAnalysis >= 2.11.0,
+  NumPy >= 1.26.0, and Python >= 3.11. (PR #23)
+
 ## [0.1.0] - 2026-11-05
 
 ### Authors

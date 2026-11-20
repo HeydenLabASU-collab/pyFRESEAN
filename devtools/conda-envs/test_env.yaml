@@ -8,8 +8,8 @@ dependencies:
   - python
   - pip
 
-  # MDAnalysis
-  - mdanalysis
+  # MDAnalysis >= 2.11
+  - mdanalysis >=2.11.0
 
   # Testing
   - pytest

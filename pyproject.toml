@@ -18,10 +18,10 @@ maintainers = [
     {name = "Amruthesh Thirumalaiswamy", email = "amru@seas.upenn.edu"},
 ]
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 dependencies = [
-    "MDAnalysis>=2.0.0",
-    "numpy>=1.23.0",
+    "MDAnalysis>=2.11.0",
+    "numpy>=1.26.0",
     "scipy>=1.9.0",
     "threadpoolctl>=3.1.0",
 ]
@@ -91,7 +91,7 @@ addopts = "-m 'not slow and not pytutorial_ref and not c_ref'"
 
 [tool.black]
 line-length = 80
-target-version = ["py39"]
+target-version = ["py311"]
 
 [tool.versioningit]
 default-version = "1+unknown"
