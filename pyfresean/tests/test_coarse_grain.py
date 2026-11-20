@@ -4,7 +4,6 @@ import MDAnalysis as mda
 
 from pyfresean.coarsegrain import (
     CoarseGrain,
-    CENTERED_MODES,
     SUPPORTED_CG_METHODS,
 )
 from pyfresean.exceptions import MissingBeadMassWarning, TopologyFormatWarning
@@ -75,78 +74,6 @@ def test_cg_universe_from_aa_universe():
     assert cg.mapping.n_beads == 3
     assert len(u_cg.trajectory) == 2
 
-
-def test_mapping_stores_orientational_reference():
-    u = _make_protein_universe()
-    mapping = CoarseGrain.from_atomgroup(u.atoms).mapping
-    assert len(mapping.reference_centered_coords) == mapping.n_beads
-
-
-def test_reconstruct_aa_universe_roundtrip_velocities(tmp_path):
-    u = _make_protein_universe(n_frames=3)
-    cg = CoarseGrain.from_atomgroup(u.atoms)
-    rot_path = tmp_path / "aa_rotations.npz"
-    u_cg = cg.build_universe(output_aa_rotations=str(rot_path))
-    u_aa = cg.reconstruct_aa_universe(u_cg=u_cg, centered=rot_path)
-
-    for frame in range(3):
-        u.trajectory[frame]
-        u_aa.trajectory[frame]
-        np.testing.assert_allclose(
-            u_aa.atoms.positions,
-            u.atoms.positions,
-            atol=1e-4,
-        )
-        np.testing.assert_allclose(
-            u_aa.atoms.velocities,
-            u.atoms.velocities,
-            atol=1e-4,
-        )
-
-
-def test_reconstruct_aa_universe_roundtrip(tmp_path):
-    u = _make_protein_universe(n_frames=3)
-    cg = CoarseGrain.from_atomgroup(u.atoms)
-    rot_path = tmp_path / "aa_rotations.npz"
-    u_cg = cg.build_universe(output_aa_rotations=str(rot_path))
-    u_aa = cg.reconstruct_aa_universe(u_cg=u_cg, centered=rot_path)
-
-    assert len(u_aa.trajectory) == 3
-    assert u_aa.atoms.n_atoms == u.atoms.n_atoms
-    for frame in range(3):
-        u.trajectory[frame]
-        u_aa.trajectory[frame]
-        np.testing.assert_allclose(
-            u_aa.atoms.positions,
-            u.atoms.positions,
-            atol=1e-4,
-        )
-
-
-def test_aa_universe_from_cg_files(tmp_path):
-    u = _make_protein_universe(n_frames=2)
-    cg = CoarseGrain.from_atomgroup(u.atoms)
-    cg_top = tmp_path / "cg.pdb"
-    cg_traj = tmp_path / "cg.trr"
-    u_cg = cg.build_universe(
-        output_cg_topology=str(cg_top), output_cg_trajectory=str(cg_traj)
-    )
-
-    u_aa = CoarseGrain.aa_universe_from_cg(
-        mapping=cg,
-        u_cg=(cg_top, cg_traj),
-    )
-    assert len(u_aa.trajectory) == 2
-
-    u.trajectory[0]
-    u_aa.trajectory[0]
-    np.testing.assert_allclose(
-        u_aa.atoms.positions,
-        u.atoms.positions,
-        atol=1e-3,
-    )
-
-
 def test_mapping_built_on_first_access():
     u = _make_protein_universe()
     cg = CoarseGrain(u.atoms)
@@ -180,29 +107,11 @@ def test_supported_cg_methods_constant():
     assert CoarseGrain.CG_METHODS == SUPPORTED_CG_METHODS
 
 
-def test_centered_modes_constant():
-    assert CENTERED_MODES == ["track", "ref"]
-
-
-def test_mapping_stores_reference_centered_coords():
-    u = _make_protein_universe()
-    mapping = CoarseGrain.from_atomgroup(u.atoms).mapping
-    assert len(mapping.reference_centered_coords) == mapping.n_beads
-
-
 def test_reference_frame_for_mapping(tmp_path):
     u = _make_protein_universe(n_frames=3)
     cg = CoarseGrain.from_atomgroup(u.atoms, reference=2)
     assert cg.reference_frame == 2
     assert cg.mapping.reference_frame == 2
-
-
-def test_centered_mode_ref_skips_tracked_vectors():
-    u = _make_protein_universe(n_frames=3)
-    cg = CoarseGrain.from_atomgroup(u.atoms)
-    cg.build_universe(centered_mode="ref")
-    assert cg.centered_mode == "ref"
-    assert cg.mapping.reference_centered_coords
 
 
 def test_save_and_load_cg_map(tmp_path):
@@ -214,180 +123,12 @@ def test_save_and_load_cg_map(tmp_path):
     loaded_mapping, method = CoarseGrain.load_mapping(map_path)
     assert method == "backbone-sidechain"
     assert loaded_mapping.n_beads == cg.mapping.n_beads
-    assert len(loaded_mapping.reference_centered_coords) == cg.mapping.n_beads
+    assert loaded_mapping.atom_indices[0].tolist() == (
+        cg.mapping.atom_indices[0].tolist()
+    )
 
     cg_reload = CoarseGrain.from_cg_map(u.atoms, map_path)
     assert cg_reload.mapping.n_beads == cg.mapping.n_beads
-
-
-def test_save_and_load_centered_deltas(tmp_path):
-    u = _make_protein_universe(n_frames=3)
-    cg = CoarseGrain.from_atomgroup(u.atoms)
-    rot_path = tmp_path / "aa_rotations.npz"
-    cg.build_universe(centered_mode="track", output_aa_rotations=str(rot_path))
-
-    centered, _, mode = CoarseGrain.load_centered_deltas(rot_path)
-    assert mode == "track"
-    assert centered is not None
-    assert centered.shape == (3, u.atoms.n_atoms, 3)
-
-
-def test_cg_universe_writes_map_and_rotations(tmp_path):
-    u = _make_protein_universe(n_frames=2)
-    map_path = tmp_path / "cg_map.npz"
-    rot_path = tmp_path / "aa_rotations.npz"
-    cg, u_cg = CoarseGrain.cg_universe(
-        aa=u,
-        centered_mode="track",
-        output_cg_map=str(map_path),
-        output_aa_rotations=str(rot_path),
-    )
-    assert map_path.is_file()
-    assert rot_path.is_file()
-    assert len(u_cg.trajectory) == 2
-
-    cg_reload = CoarseGrain.from_cg_map(u.atoms, map_path)
-    u_aa = cg_reload.reconstruct_aa_universe(u_cg=u_cg, centered=rot_path)
-    for frame in range(2):
-        u.trajectory[frame]
-        u_aa.trajectory[frame]
-        np.testing.assert_allclose(
-            u_aa.atoms.positions, u.atoms.positions, atol=1e-4
-        )
-
-
-def test_reconstruct_aa_universe_from_file_paths(tmp_path):
-    u = _make_protein_universe(n_frames=2)
-    map_path = tmp_path / "cg_map.npz"
-    rot_path = tmp_path / "aa_rotations.npz"
-    cg_top = tmp_path / "cg.pdb"
-    cg_traj = tmp_path / "cg.trr"
-    cg, u_cg = CoarseGrain.cg_universe(
-        aa=u,
-        output_cg_map=str(map_path),
-        output_aa_rotations=str(rot_path),
-        output_cg_topology=str(cg_top),
-        output_cg_trajectory=str(cg_traj),
-    )
-
-    u_aa = cg.reconstruct_aa_universe(
-        u_cg=(cg_top, cg_traj),
-        centered=rot_path,
-    )
-    u.trajectory[0]
-    u_aa.trajectory[0]
-    np.testing.assert_allclose(
-        u_aa.atoms.positions, u.atoms.positions, atol=1e-3
-    )
-
-
-def test_track_backmap_from_top_trr_matches_source(tmp_path):
-    u = _make_protein_universe(n_frames=5)
-    map_path = tmp_path / "cg_map.npz"
-    rot_path = tmp_path / "aa_rotations.npz"
-    cg_top = tmp_path / "cg.top"
-    cg_traj = tmp_path / "cg.trr"
-    cg, _ = CoarseGrain.cg_universe(
-        aa=u,
-        output_cg_map=str(map_path),
-        output_aa_rotations=str(rot_path),
-        output_cg_topology=str(cg_top),
-        output_cg_trajectory=str(cg_traj),
-    )
-
-    u_cg_raw = mda.Universe(str(cg_top), str(cg_traj), topology_format="ITP")
-    cg._restore_bead_masses(u_cg_raw)
-    u_aa = cg.reconstruct_aa_universe(u_cg=u_cg_raw, centered=rot_path)
-    for frame in range(len(u.trajectory)):
-        u.trajectory[frame]
-        u_aa.trajectory[frame]
-        np.testing.assert_allclose(
-            u_aa.atoms.positions, u.atoms.positions, atol=1e-3
-        )
-
-
-def test_aa_universe_from_cg_with_atomgroup_and_map(tmp_path):
-    u = _make_protein_universe(n_frames=2)
-    map_path = tmp_path / "cg_map.npz"
-    rot_path = tmp_path / "aa_rotations.npz"
-    cg_top = tmp_path / "cg.pdb"
-    cg_traj = tmp_path / "cg.trr"
-    CoarseGrain.cg_universe(
-        aa=u,
-        output_cg_map=str(map_path),
-        output_aa_rotations=str(rot_path),
-        output_cg_topology=str(cg_top),
-        output_cg_trajectory=str(cg_traj),
-    )
-
-    u_aa = CoarseGrain.aa_universe_from_cg(
-        u_cg=(cg_top, cg_traj),
-        mapping=(u.atoms, map_path),
-        centered=rot_path,
-    )
-    u.trajectory[0]
-    u_aa.trajectory[0]
-    np.testing.assert_allclose(
-        u_aa.atoms.positions, u.atoms.positions, atol=1e-3
-    )
-
-
-def test_aa_universe_from_cg_with_cg_and_u_cg(tmp_path):
-    u = _make_protein_universe(n_frames=2)
-    rot_path = tmp_path / "aa_rotations.npz"
-    cg, u_cg = CoarseGrain.cg_universe(
-        aa=u,
-        output_aa_rotations=str(rot_path),
-    )
-    u_aa = CoarseGrain.aa_universe_from_cg(
-        mapping=cg,
-        u_cg=u_cg,
-        centered=rot_path,
-    )
-    u.trajectory[0]
-    u_aa.trajectory[0]
-    np.testing.assert_allclose(
-        u_aa.atoms.positions, u.atoms.positions, atol=1e-4
-    )
-
-
-def test_track_mode_writes_rotation_file_not_instance(tmp_path):
-    u = _make_protein_universe(n_frames=3)
-    rot_path = tmp_path / "aa_rotations.npz"
-    cg = CoarseGrain.from_atomgroup(u.atoms)
-    cg.build_universe(centered_mode="track", output_aa_rotations=str(rot_path))
-    assert rot_path.is_file()
-    centered, _, mode = CoarseGrain.load_centered_deltas(rot_path)
-    assert mode == "track"
-    assert centered.shape == (3, u.atoms.n_atoms, 3)
-
-    cg_ref = CoarseGrain.from_atomgroup(u.atoms)
-    cg_ref.build_universe(centered_mode="ref")
-    assert cg_ref.mapping.reference_centered_coords
-
-
-def test_aa_universe_from_cg_with_saved_rotations(tmp_path):
-    u = _make_protein_universe(n_frames=2)
-    cg = CoarseGrain.from_atomgroup(u.atoms)
-    cg_top = tmp_path / "cg.pdb"
-    cg_traj = tmp_path / "cg.trr"
-    rot_path = tmp_path / "aa_rotations.npz"
-    u_cg = cg.build_universe(
-        output_cg_topology=str(cg_top),
-        output_cg_trajectory=str(cg_traj),
-        output_aa_rotations=str(rot_path),
-    )
-
-    u_aa = CoarseGrain.aa_universe_from_cg(
-        mapping=cg,
-        u_cg=(cg_top, cg_traj),
-        centered=rot_path,
-    )
-    u.trajectory[0]
-    u_aa.trajectory[0]
-    np.testing.assert_allclose(
-        u_aa.atoms.positions, u.atoms.positions, atol=1e-3
-    )
 
 
 def test_from_atomgroup_builds_mapping_eagerly():
@@ -404,33 +145,6 @@ def test_build_canonical_mapping_bead_counts():
     assert mapping.bead_types == ["BACK", "SIDE", "BACK"]
     assert mapping.bead_masses[0] == pytest.approx(54.0)
     assert mapping.bead_masses[1] == pytest.approx(12.0)
-
-
-def test_backmap_positions_exact_with_tracked_centered():
-    u = _make_protein_universe(n_frames=3)
-    u.atoms.positions = np.arange(
-        u.atoms.n_atoms * 3, dtype=np.float32
-    ).reshape(-1, 3)
-    for frame in range(3):
-        u.trajectory[frame]
-        u.atoms.positions += frame * 0.17
-    cg = CoarseGrain.from_atomgroup(u.atoms)
-    for frame in range(3):
-        u.trajectory[frame]
-        centered = cg.compute_centered_coords(u.atoms.positions)
-        rebuilt = cg.backmap_positions(
-            cg.map_positions(u.atoms.positions), centered
-        )
-        np.testing.assert_allclose(rebuilt, u.atoms.positions, atol=1e-5)
-
-
-def test_backmap_positions_uses_reference_when_centered_omitted():
-    u = _make_protein_universe()
-    cg = CoarseGrain.from_atomgroup(u.atoms)
-    com = cg.map_positions(u.atoms.positions)
-    rebuilt = cg.backmap_positions(com)
-    np.testing.assert_allclose(rebuilt, u.atoms.positions, atol=1e-5)
-
 
 def test_map_positions_matches_hand_com():
     u = _make_protein_universe()

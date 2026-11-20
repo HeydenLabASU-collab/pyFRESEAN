@@ -18,6 +18,16 @@ The rules for this file:
 
 ## [Unreleased]
 
+### Removed
+- Per-frame and reference-frame centering used to rebuild all-atom
+  coordinates from coarse-grained beads. That includes ``centered_mode``,
+  ``output_aa_rotations`` / ``aa_rotations.npz``,
+  ``reconstruct_aa_universe``, ``aa_universe_from_cg``,
+  ``backmap_positions``, and ``backmap_velocities``. ``backmap_modes``
+  is unchanged: each atom in a bead keeps the bead's Cartesian
+  direction, scaled by ``sqrt(m_i / M_b)``. Saved ``cg_map.npz`` files
+  no longer store ``ref_centered_*`` arrays; older files still load. (PR #24)
+
 ### Changed
 - ``Align`` no longer rotates velocities after the Kabsch fit.
   ``AtomGroup.rotate()`` in MDAnalysis 2.11.0 and later rotates
