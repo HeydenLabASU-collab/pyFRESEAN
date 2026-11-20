@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 import warnings
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -36,14 +36,6 @@ SUPPORTED_CG_METHODS = [
     "martini",
 ]
 
-CENTERED_MODES = [
-    "track",
-    "ref",
-]
-
-# Trajectory / centered-vector I/O and backmap arithmetic use float32.
-_BACKMAP_DTYPE = np.float32
-
 UniverseSource = Union[
     mda.Universe,
     str,
@@ -51,8 +43,6 @@ UniverseSource = Union[
     Tuple[Union[str, Path], Optional[Union[str, Path]]],
     Sequence[Union[str, Path]],
 ]
-
-CenteredSource = Union[str, Path, np.ndarray]
 
 
 @dataclass
@@ -66,10 +56,6 @@ class CoarseGrainMap:
     bead_types: List[str]
     atom_indices: List[np.ndarray]
     n_constraints: float = 0.0
-    reference_centered_coords: List[np.ndarray] = field(default_factory=list)
-    reference_centered_velocities: List[np.ndarray] = field(
-        default_factory=list
-    )
     reference_frame: int = 0
 
     @property
@@ -78,11 +64,6 @@ class CoarseGrainMap:
 
 
 MapSource = Union[CoarseGrainMap, str, Path]
-
-MappingContext = Union[
-    "CoarseGrain",
-    Tuple[Union["AtomGroup", mda.Universe], MapSource],
-]
 
 
 class CoarseGrain:
@@ -132,7 +113,6 @@ class CoarseGrain:
         self._memory_universe: Optional[mda.Universe] = None
         self._memory_n_frames: int = 0
         self._reference_frame: int = 0
-        self._centered_mode: str = "track"
         self.benchmark: Optional[dict[str, float]] = None
 
     def _ensure_mapping(
@@ -158,11 +138,6 @@ class CoarseGrain:
     def method(self) -> str:
         """Coarse-graining scheme used for this instance."""
         return self._method
-
-    @property
-    def centered_mode(self) -> str:
-        """How COM-relative atom vectors are handled (``track`` or ``ref``)."""
-        return self._centered_mode
 
     @property
     def reference_frame(self) -> int:
@@ -203,40 +178,6 @@ class CoarseGrain:
         self._reference_frame = mapping.reference_frame
         self._n_constraints = mapping.n_constraints
 
-    @staticmethod
-    def _resolve_centered_deltas_traj(
-        centered: CenteredSource,
-    ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[str]]:
-        if isinstance(centered, np.ndarray):
-            array = np.asarray(centered, dtype=_BACKMAP_DTYPE)
-            if array.ndim != 3 or array.shape[-1] != 3:
-                raise ValueError(
-                    "expected centered array shape (n_frames, n_atoms, 3), "
-                    f"got {array.shape}"
-                )
-            return array, None, None
-        centered_deltas, centered_vel, centered_mode = (
-            CoarseGrain.load_centered_deltas(centered)
-        )
-        return centered_deltas, centered_vel, centered_mode
-
-    @classmethod
-    def _coarsegrain_from_mapping(cls, mapping: MappingContext) -> CoarseGrain:
-        """Return a :class:`CoarseGrain` from an instance or ``(aa, cg_map)`` pair."""
-        if isinstance(mapping, CoarseGrain):
-            return mapping
-        if isinstance(mapping, tuple) and len(mapping) == 2:
-            aa, map_source = mapping
-            if isinstance(aa, mda.Universe):
-                atomgroup = aa.atoms
-            else:
-                atomgroup = aa
-            return cls.from_cg_map(atomgroup, map_source)
-        raise TypeError(
-            "expected a CoarseGrain instance or (aa_atomgroup, cg_map) pair; "
-            f"got {type(mapping).__name__}"
-        )
-
     @classmethod
     def _normalize_method(cls, method: str) -> str:
         normalized = method.strip().lower().replace("_", "-")
@@ -244,17 +185,6 @@ class CoarseGrain:
             supported = ", ".join(cls.CG_METHODS)
             raise ValueError(
                 f"unsupported coarse-graining method {method!r}; "
-                f"choose one of: {supported}"
-            )
-        return normalized
-
-    @classmethod
-    def _normalize_centered_mode(cls, centered_mode: str) -> str:
-        normalized = centered_mode.strip().lower()
-        if normalized not in CENTERED_MODES:
-            supported = ", ".join(CENTERED_MODES)
-            raise ValueError(
-                f"unsupported centered mode {centered_mode!r}; "
                 f"choose one of: {supported}"
             )
         return normalized
@@ -323,13 +253,6 @@ class CoarseGrain:
         }
         for bead_idx in range(mapping.n_beads):
             data[f"atom_indices_{bead_idx}"] = mapping.atom_indices[bead_idx]
-            data[f"ref_centered_{bead_idx}"] = (
-                mapping.reference_centered_coords[bead_idx]
-            )
-            if mapping.reference_centered_velocities:
-                data[f"ref_centered_vel_{bead_idx}"] = (
-                    mapping.reference_centered_velocities[bead_idx]
-                )
         return data
 
     @classmethod
@@ -345,24 +268,12 @@ class CoarseGrain:
             resnames = list(archive["resnames"])
             bead_types = list(archive["bead_types"])
             atom_indices: List[np.ndarray] = []
-            reference_centered_coords: List[np.ndarray] = []
-            reference_centered_velocities: List[np.ndarray] = []
             for bead_idx in range(n_beads):
                 atom_indices.append(
                     np.asarray(
                         archive[f"atom_indices_{bead_idx}"], dtype=np.int64
                     )
                 )
-                reference_centered_coords.append(
-                    np.asarray(
-                        archive[f"ref_centered_{bead_idx}"], dtype=np.float64
-                    )
-                )
-                vel_key = f"ref_centered_vel_{bead_idx}"
-                if vel_key in archive:
-                    reference_centered_velocities.append(
-                        np.asarray(archive[vel_key], dtype=np.float64)
-                    )
             mapping = CoarseGrainMap(
                 bead_names=bead_names,
                 bead_masses=np.asarray(
@@ -373,8 +284,6 @@ class CoarseGrain:
                 bead_types=bead_types,
                 atom_indices=atom_indices,
                 n_constraints=float(archive["n_constraints"]),
-                reference_centered_coords=reference_centered_coords,
-                reference_centered_velocities=reference_centered_velocities,
                 reference_frame=int(archive["reference_frame"]),
             )
         return mapping, method
@@ -385,72 +294,6 @@ class CoarseGrain:
         data = self._mapping_to_npz_dict(mapping, self.method)
         np.savez_compressed(str(map_path), **data)
         return mapping
-
-    def save_centered_deltas(
-        self,
-        path: Union[str, Path],
-        centered_deltas: Optional[np.ndarray] = None,
-        centered_velocity_deltas: Optional[np.ndarray] = None,
-    ) -> None:
-        """Write per-frame centered displacement vectors to ``.npz``.
-
-        Each stored vector is the bead-COM-relative offset for one atom:
-        ``centered[i] = x_i - COM_bead(i)`` and, when provided,
-        ``centered_vel[i] = v_i - COM_vel_bead(i)``. Reference-frame vectors
-        live on :attr:`CoarseGrainMap.reference_centered_coords` in
-        ``cg_map.npz``.
-        """
-        mapping = self._ensure_mapping()
-        payload: dict[str, np.ndarray] = {
-            "centered_mode": np.array(self._centered_mode),
-            "reference_frame": np.array(mapping.reference_frame),
-        }
-        if centered_deltas is not None:
-            payload["centered_deltas"] = np.asarray(
-                centered_deltas, dtype=np.float32
-            )
-        if centered_velocity_deltas is not None:
-            payload["centered_velocity_deltas"] = np.asarray(
-                centered_velocity_deltas,
-                dtype=np.float32,
-            )
-        np.savez_compressed(str(path), **payload)
-
-    @classmethod
-    def load_centered_deltas(
-        cls,
-        path: Union[str, Path],
-    ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], str]:
-        """Load per-frame centered vectors and centered mode from ``.npz``.
-
-        Returns
-        -------
-        centered_deltas
-            Position offsets with shape ``(n_frames, n_atoms, 3)`` when
-            ``centered_mode`` is ``track``, otherwise ``None``.
-        centered_velocity_deltas
-            Velocity offsets with the same shape when saved, otherwise ``None``.
-        centered_mode
-            ``track`` or ``ref``.
-        """
-        with np.load(str(path), allow_pickle=True) as archive:
-            if "centered_mode" not in archive:
-                raise ValueError(
-                    "aa_rotations file missing centered_mode metadata"
-                )
-            centered_mode = str(archive["centered_mode"])
-            centered = None
-            centered_vel = None
-            if "centered_deltas" in archive:
-                centered = np.asarray(
-                    archive["centered_deltas"], dtype=_BACKMAP_DTYPE
-                )
-            if "centered_velocity_deltas" in archive:
-                centered_vel = np.asarray(
-                    archive["centered_velocity_deltas"],
-                    dtype=_BACKMAP_DTYPE,
-                )
-        return centered, centered_vel, centered_mode
 
     @classmethod
     def _warn_topology_format(cls, topology_path: str | Path) -> None:
@@ -478,8 +321,6 @@ class CoarseGrain:
         output_cg_topology: Optional[str] = None,
         in_memory: bool = True,
         reference: int = 0,
-        centered_mode: str = "track",
-        output_aa_rotations: Optional[str] = None,
         output_cg_map: Optional[str] = None,
         benchmark: bool = False,
     ) -> Tuple[CoarseGrain, mda.Universe]:
@@ -505,15 +346,8 @@ class CoarseGrain:
             If ``False``, stream to ``output_cg_topology`` and ``output_cg_trajectory``
             without holding the full CG trajectory in RAM (both outputs required).
         reference
-            Trajectory frame used to build bead mapping and orientational
-            reference geometry (default first frame).
-        centered_mode
-            ``track`` saves per-frame COM-relative atom vectors to
-            ``output_aa_rotations``; ``ref`` keeps only reference-frame vectors
-            on the mapping.
-        output_aa_rotations
-            If set, write ``aa_rotations.npz`` with per-frame centered vectors
-            (``track`` mode) or mode metadata only (``ref``).
+            Trajectory frame index stored on the mapping (default first frame).
+            Bead membership does not depend on coordinates.
         output_cg_map
             If set, write :attr:`CoarseGrain.mapping` to an ``.npz`` file.
         benchmark
@@ -541,7 +375,6 @@ class CoarseGrain:
             reference=reference,
             timings=timings,
         )
-        cg._centered_mode = cls._normalize_centered_mode(centered_mode)
         if output_cg_topology is not None:
             cls._warn_topology_format(output_cg_topology)
         u_cg = cg.build_universe(
@@ -552,8 +385,6 @@ class CoarseGrain:
             output_cg_trajectory=output_cg_trajectory,
             output_cg_topology=output_cg_topology,
             in_memory=in_memory,
-            centered_mode=centered_mode,
-            output_aa_rotations=output_aa_rotations,
             output_cg_map=output_cg_map,
             benchmark=benchmark,
             timings=timings,
@@ -665,25 +496,6 @@ class CoarseGrain:
         if not bead_names:
             raise ValueError("atom group produced no coarse-grained beads")
 
-        reference_centered_coords: List[np.ndarray] = []
-        reference_centered_velocities: List[np.ndarray] = []
-        positions = atomgroup.positions
-        for indices in atom_indices:
-            com = cls._weighted_com(positions, masses, indices)
-            reference_centered_coords.append(
-                (positions[indices] - com).astype(np.float64, copy=False)
-            )
-        trajectory = atomgroup.universe.trajectory
-        if trajectory is not None and trajectory.ts.has_velocities:
-            velocities = atomgroup.velocities
-            for indices in atom_indices:
-                com_vel = cls._weighted_com(velocities, masses, indices)
-                reference_centered_velocities.append(
-                    (velocities[indices] - com_vel).astype(
-                        np.float64, copy=False
-                    )
-                )
-
         return CoarseGrainMap(
             bead_names=bead_names,
             bead_masses=np.asarray(bead_masses, dtype=np.float64),
@@ -692,8 +504,6 @@ class CoarseGrain:
             bead_types=bead_types,
             atom_indices=atom_indices,
             n_constraints=n_constraints,
-            reference_centered_coords=reference_centered_coords,
-            reference_centered_velocities=reference_centered_velocities,
         )
 
     @classmethod
@@ -705,155 +515,6 @@ class CoarseGrain:
         raise NotImplementedError(
             "Martini coarse-graining (method='martini') is not implemented yet."
         )
-
-    def compute_centered_coords(self, positions: np.ndarray) -> np.ndarray:
-        """Per-atom displacement vectors from each bead COM to the atom.
-
-        Returns an array with shape ``(n_atoms, 3)`` where, for atom ``i`` in
-        bead ``b``,
-
-        ``centered[i] = positions[i] - COM_b(positions)``.
-
-        These vectors are stored on the mapping at the reference frame and, when
-        ``centered_mode='track'``, for every trajectory frame in
-        ``aa_rotations.npz``.
-        """
-        mapping = self._ensure_mapping()
-        masses = self._atom_masses()
-        n_atoms = self.atomgroup.n_atoms
-        centered = np.zeros((n_atoms, 3), dtype=np.float64)
-        for bead_idx, indices in enumerate(mapping.atom_indices):
-            com = self._weighted_com(positions, masses, indices)
-            centered[indices] = (
-                np.asarray(positions[indices], dtype=np.float64) - com
-            )
-        return centered
-
-    def backmap_positions(
-        self,
-        cg_positions: np.ndarray,
-        centered_coords: Optional[np.ndarray] = None,
-    ) -> np.ndarray:
-        """Reconstruct all-atom positions from CG bead COMs.
-
-        Parameters
-        ----------
-        cg_positions
-            Shape ``(n_beads, 3)`` — bead center-of-mass coordinates.
-        centered_coords
-            Optional per-atom COM-relative vectors with shape ``(n_atoms, 3)``.
-            When omitted, uses :attr:`CoarseGrainMap.reference_centered_coords`
-            from the mapping (reference-frame internal geometry; ``ref`` mode).
-
-        Notes
-        -----
-        Reconstruction is
-
-        ``x_i = COM_b + d_i``
-
-        where ``d_i`` is the stored centered vector for atom ``i``. With tracked
-        ``d_i`` from the same frame, this inverts coarse-graining exactly (up to
-        float32 storage of COM and vectors).
-        """
-        mapping = self._ensure_mapping()
-        if not mapping.reference_centered_coords:
-            raise ValueError("mapping has no orientational reference data")
-
-        cg_positions = np.asarray(cg_positions, dtype=_BACKMAP_DTYPE)
-        if cg_positions.shape != (mapping.n_beads, 3):
-            raise ValueError(
-                f"expected cg_positions shape ({mapping.n_beads}, 3), "
-                f"got {cg_positions.shape}"
-            )
-
-        n_atoms = self.atomgroup.n_atoms
-        aa_positions = np.zeros((n_atoms, 3), dtype=_BACKMAP_DTYPE)
-        if centered_coords is None:
-            for bead_idx, indices in enumerate(mapping.atom_indices):
-                ref_centered = np.asarray(
-                    mapping.reference_centered_coords[bead_idx],
-                    dtype=_BACKMAP_DTYPE,
-                )
-                aa_positions[indices] = cg_positions[bead_idx] + ref_centered
-            return aa_positions
-
-        centered_coords = np.asarray(centered_coords, dtype=_BACKMAP_DTYPE)
-        if centered_coords.shape != (n_atoms, 3):
-            raise ValueError(
-                f"expected centered_coords shape ({n_atoms}, 3), "
-                f"got {centered_coords.shape}"
-            )
-        for bead_idx, indices in enumerate(mapping.atom_indices):
-            aa_positions[indices] = (
-                cg_positions[bead_idx] + centered_coords[indices]
-            )
-        return aa_positions
-
-    def compute_centered_velocities(self, velocities: np.ndarray) -> np.ndarray:
-        """Per-atom velocity offsets from each bead COM velocity.
-
-        Returns shape ``(n_atoms, 3)`` with ``centered_vel[i] = v_i - COM_vel_b``.
-        """
-        mapping = self._ensure_mapping()
-        masses = self._atom_masses()
-        n_atoms = self.atomgroup.n_atoms
-        centered = np.zeros((n_atoms, 3), dtype=np.float64)
-        for bead_idx, indices in enumerate(mapping.atom_indices):
-            com_vel = self._weighted_com(velocities, masses, indices)
-            centered[indices] = (
-                np.asarray(velocities[indices], dtype=np.float64) - com_vel
-            )
-        return centered
-
-    def backmap_velocities(
-        self,
-        cg_velocities: np.ndarray,
-        centered_velocities: Optional[np.ndarray] = None,
-    ) -> np.ndarray:
-        """Reconstruct all-atom velocities from CG bead COM velocities.
-
-        Uses ``v_i = COM_vel_b + u_i`` where ``u_i`` is the stored COM-relative
-        velocity offset (tracked per frame or reference-frame default).
-        """
-        mapping = self._ensure_mapping()
-        cg_velocities = np.asarray(cg_velocities, dtype=_BACKMAP_DTYPE)
-        if cg_velocities.shape != (mapping.n_beads, 3):
-            raise ValueError(
-                f"expected cg_velocities shape ({mapping.n_beads}, 3), "
-                f"got {cg_velocities.shape}"
-            )
-
-        n_atoms = self.atomgroup.n_atoms
-        aa_velocities = np.zeros((n_atoms, 3), dtype=_BACKMAP_DTYPE)
-        if centered_velocities is None:
-            if not mapping.reference_centered_velocities:
-                raise ValueError(
-                    "mapping has no reference centered velocities; provide "
-                    "tracked centered velocity offsets"
-                )
-            for bead_idx, indices in enumerate(mapping.atom_indices):
-                ref_centered_vel = np.asarray(
-                    mapping.reference_centered_velocities[bead_idx],
-                    dtype=_BACKMAP_DTYPE,
-                )
-                aa_velocities[indices] = (
-                    cg_velocities[bead_idx] + ref_centered_vel
-                )
-            return aa_velocities
-
-        centered_velocities = np.asarray(
-            centered_velocities, dtype=_BACKMAP_DTYPE
-        )
-        if centered_velocities.shape != (n_atoms, 3):
-            raise ValueError(
-                f"expected centered_velocities shape ({n_atoms}, 3), "
-                f"got {centered_velocities.shape}"
-            )
-        for bead_idx, indices in enumerate(mapping.atom_indices):
-            aa_velocities[indices] = (
-                cg_velocities[bead_idx] + centered_velocities[indices]
-            )
-        return aa_velocities
 
     @staticmethod
     def _weighted_com(
@@ -1109,16 +770,12 @@ class CoarseGrain:
         frame_list: list[int],
         output_top: str,
         output_traj: str,
-        track_centered: bool = True,
-        output_aa_rotations: Optional[str] = None,
         timings: Optional[dict[str, float]] = None,
-    ) -> Tuple[mda.Universe, Optional[np.ndarray]]:
+    ) -> mda.Universe:
         trajectory = self.atomgroup.universe.trajectory
         ag = self.atomgroup
         scratch = self.empty_cg_universe(n_frames=1)
         has_velocities = None
-        bead_centered_list: list[np.ndarray] = []
-        bead_centered_vel_list: list[np.ndarray] = []
 
         with mda.Writer(output_traj, n_atoms=scratch.atoms.n_atoms) as writer:
             for frame_idx, frame in enumerate(frame_list):
@@ -1126,14 +783,6 @@ class CoarseGrain:
                     t_process = time.perf_counter()
                 trajectory[frame]
                 bead_pos = self.map_positions(ag.positions)
-                if track_centered:
-                    bead_centered_list.append(
-                        self.compute_centered_coords(ag.positions)
-                    )
-                    if trajectory.ts.has_velocities:
-                        bead_centered_vel_list.append(
-                            self.compute_centered_velocities(ag.velocities)
-                        )
                 if has_velocities is None:
                     has_velocities = trajectory.ts.has_velocities
                 bead_vel = (
@@ -1165,15 +814,6 @@ class CoarseGrain:
                         time.perf_counter() - t_write
                     )
 
-        centered_deltas = None
-        centered_velocity_deltas = None
-        if track_centered:
-            centered_deltas = np.asarray(bead_centered_list, dtype=np.float32)
-            if bead_centered_vel_list:
-                centered_velocity_deltas = np.asarray(
-                    bead_centered_vel_list,
-                    dtype=np.float32,
-                )
         if timings is not None:
             t_assemble = time.perf_counter()
         universe = self._load_cg_universe_from_disk(output_top, output_traj)
@@ -1181,33 +821,14 @@ class CoarseGrain:
             timings[BENCH_T_ASSEMBLE_UNIVERSE] += (
                 time.perf_counter() - t_assemble
             )
-        if output_aa_rotations is not None:
-            if timings is not None:
-                t_write = time.perf_counter()
-            self.save_centered_deltas(
-                output_aa_rotations,
-                centered_deltas=centered_deltas,
-                centered_velocity_deltas=centered_velocity_deltas,
-            )
-            if timings is not None:
-                timings[BENCH_T_WRITE_OUTPUTS] += time.perf_counter() - t_write
-        return universe, centered_deltas
+        return universe
 
     def _write_cg_outputs(
         self,
-        output_aa_rotations: Optional[str] = None,
         output_cg_map: Optional[str] = None,
-        centered_deltas: Optional[np.ndarray] = None,
-        centered_velocity_deltas: Optional[np.ndarray] = None,
     ) -> None:
         if output_cg_map is not None:
             self.save_mapping(output_cg_map)
-        if output_aa_rotations is not None:
-            self.save_centered_deltas(
-                output_aa_rotations,
-                centered_deltas=centered_deltas,
-                centered_velocity_deltas=centered_velocity_deltas,
-            )
 
     def build_universe(
         self,
@@ -1218,8 +839,6 @@ class CoarseGrain:
         output_cg_trajectory: Optional[str] = None,
         output_cg_topology: Optional[str] = None,
         in_memory: bool = True,
-        centered_mode: Optional[str] = None,
-        output_aa_rotations: Optional[str] = None,
         output_cg_map: Optional[str] = None,
         benchmark: bool = False,
         timings: Optional[dict[str, float]] = None,
@@ -1239,9 +858,6 @@ class CoarseGrain:
             Optional timing dict populated when benchmarking. When omitted and
             ``benchmark=True``, a new dict is created on this instance.
         """
-        if centered_mode is not None:
-            self._centered_mode = self._normalize_centered_mode(centered_mode)
-        track_centered = self._centered_mode == "track"
         if benchmark and timings is None:
             timings = new_cg_benchmark_timings()
         self._ensure_mapping(timings=timings)
@@ -1254,7 +870,7 @@ class CoarseGrain:
         if not frame_list:
             if timings is not None:
                 t_write = time.perf_counter()
-            self._write_cg_outputs(output_aa_rotations, output_cg_map)
+            self._write_cg_outputs(output_cg_map)
             if timings is not None:
                 timings[BENCH_T_WRITE_OUTPUTS] += time.perf_counter() - t_write
                 self.benchmark = finalize_cg_benchmark(timings)
@@ -1266,21 +882,15 @@ class CoarseGrain:
                     "in_memory=False requires both output_cg_trajectory and "
                     "output_cg_topology"
                 )
-            universe, centered_deltas = self._cg_universe_to_disk(
+            universe = self._cg_universe_to_disk(
                 frame_list,
                 output_cg_topology,
                 output_cg_trajectory,
-                track_centered=track_centered,
-                output_aa_rotations=output_aa_rotations,
                 timings=timings,
             )
             if timings is not None:
                 t_write = time.perf_counter()
-            self._write_cg_outputs(
-                output_aa_rotations=None,
-                output_cg_map=output_cg_map,
-                centered_deltas=None,
-            )
+            self._write_cg_outputs(output_cg_map)
             if timings is not None:
                 timings[BENCH_T_WRITE_OUTPUTS] += time.perf_counter() - t_write
                 self.benchmark = finalize_cg_benchmark(timings)
@@ -1288,8 +898,6 @@ class CoarseGrain:
 
         positions = []
         velocities = []
-        bead_centered_list: list[np.ndarray] = []
-        bead_centered_vel_list: list[np.ndarray] = []
         dimensions_list: list[Optional[np.ndarray]] = []
         has_velocities = None
 
@@ -1298,14 +906,6 @@ class CoarseGrain:
                 t_process = time.perf_counter()
             trajectory[frame]
             positions.append(self.map_positions(ag.positions))
-            if track_centered:
-                bead_centered_list.append(
-                    self.compute_centered_coords(ag.positions)
-                )
-                if trajectory.ts.has_velocities:
-                    bead_centered_vel_list.append(
-                        self.compute_centered_velocities(ag.velocities)
-                    )
             if output_cg_trajectory is not None:
                 dims = trajectory.ts.dimensions
                 dimensions_list.append(
@@ -1322,16 +922,6 @@ class CoarseGrain:
 
         if timings is not None:
             t_assemble = time.perf_counter()
-
-        centered_deltas = None
-        centered_velocity_deltas = None
-        if track_centered:
-            centered_deltas = np.asarray(bead_centered_list, dtype=np.float32)
-            if bead_centered_vel_list:
-                centered_velocity_deltas = np.asarray(
-                    bead_centered_vel_list,
-                    dtype=np.float32,
-                )
 
         n_frames = len(positions)
         u = self.empty_cg_universe(n_frames=n_frames)
@@ -1357,216 +947,11 @@ class CoarseGrain:
                 u, output_cg_trajectory, dimensions=dimensions_list
             )
 
-        self._write_cg_outputs(
-            output_aa_rotations=output_aa_rotations,
-            output_cg_map=output_cg_map,
-            centered_deltas=centered_deltas,
-            centered_velocity_deltas=centered_velocity_deltas,
-        )
+        self._write_cg_outputs(output_cg_map)
         if timings is not None:
             timings[BENCH_T_WRITE_OUTPUTS] += time.perf_counter() - t_write
             self.benchmark = finalize_cg_benchmark(timings)
         return u
-
-    def _create_aa_output_universe(
-        self,
-        n_frames: int,
-        has_velocities: bool = False,
-    ) -> mda.Universe:
-        """Topology clone of ``self.atomgroup`` with an in-memory trajectory."""
-        import os
-        import tempfile
-
-        fd, path = tempfile.mkstemp(suffix=".pdb")
-        os.close(fd)
-        try:
-            self.atomgroup.write(path)
-            u_aa = mda.Universe(path)
-            if n_frames > 0:
-                positions = np.zeros(
-                    (n_frames, self.atomgroup.n_atoms, 3),
-                    dtype=np.float32,
-                )
-                if has_velocities:
-                    velocities = np.zeros_like(positions)
-                    u_aa.trajectory = MemoryReader(
-                        positions, velocities=velocities
-                    )
-                else:
-                    u_aa.trajectory = MemoryReader(positions)
-            return u_aa
-        finally:
-            os.unlink(path)
-
-    def reconstruct_aa_universe(
-        self,
-        u_cg: UniverseSource,
-        centered: Optional[CenteredSource] = None,
-        centered_velocities: Optional[CenteredSource] = None,
-        start: Optional[int] = None,
-        stop: Optional[int] = None,
-        step: Optional[int] = None,
-        frames: Optional[Iterable[int]] = None,
-    ) -> mda.Universe:
-        """Reconstruct an all-atom universe from a CG trajectory.
-
-        Mapping and AA topology come from this :class:`CoarseGrain` instance.
-
-        Parameters
-        ----------
-        u_cg
-            Coarse-grained input as an MDAnalysis universe, topology path, or
-            ``(topology, trajectory)`` pair.
-        centered
-            Per-frame centered displacement vectors (``.npz`` path or array with
-            shape ``(n_frames, n_atoms, 3)``). When omitted, reference-frame
-            vectors from the mapping are used for every frame.
-        centered_velocities
-            Optional per-frame COM-relative velocity offsets with the same
-            shape. When omitted, loaded from ``centered`` if present, else
-            reference-frame velocity offsets from the mapping.
-
-        CG trajectory files contain bead COM positions only. Per-frame centered
-        vectors are written to ``output_aa_rotations`` when ``centered_mode='track'``;
-        reference-frame vectors live in ``cg_map.npz`` as
-        ``ref_centered_*`` arrays.
-
-        Clashes and unrealistic geometries are possible; this is a geometric
-        reconstruction, not an energy-minimized structure.
-        """
-        centered_traj: Optional[np.ndarray] = None
-        centered_vel_traj: Optional[np.ndarray] = None
-        if centered is not None:
-            centered_traj, loaded_vel, loaded_mode = (
-                self._resolve_centered_deltas_traj(centered)
-            )
-            if loaded_mode is not None:
-                self._centered_mode = loaded_mode
-            if loaded_vel is not None:
-                centered_vel_traj = loaded_vel
-            if self._centered_mode == "track" and centered_traj is None:
-                raise ValueError(
-                    "centered input contains no per-frame centered_deltas"
-                )
-        if centered_velocities is not None:
-            if isinstance(centered_velocities, np.ndarray):
-                centered_vel_traj = np.asarray(
-                    centered_velocities,
-                    dtype=_BACKMAP_DTYPE,
-                )
-            else:
-                _, loaded_vel, _ = self.load_centered_deltas(
-                    centered_velocities
-                )
-                if loaded_vel is None:
-                    raise ValueError(
-                        "centered_velocities file has no centered_velocity_deltas"
-                    )
-                centered_vel_traj = loaded_vel
-        u_cg_universe = self._resolve_universe(u_cg)
-        self._ensure_mapping()
-        frame_list = self._resolve_frame_list(
-            u_cg_universe.trajectory,
-            start,
-            stop,
-            step,
-            frames,
-        )
-        if not frame_list:
-            return self._create_aa_output_universe(n_frames=0)
-
-        cg_has_velocities = u_cg_universe.trajectory.ts.has_velocities
-        mapping_has_ref_vel = bool(self.mapping.reference_centered_velocities)
-        output_has_velocities = cg_has_velocities and (
-            centered_vel_traj is not None or mapping_has_ref_vel
-        )
-        u_aa = self._create_aa_output_universe(
-            n_frames=len(frame_list),
-            has_velocities=output_has_velocities,
-        )
-
-        for out_idx, cg_frame in enumerate(frame_list):
-            u_cg_universe.trajectory[cg_frame]
-            cg_positions = np.asarray(
-                u_cg_universe.atoms.positions,
-                dtype=_BACKMAP_DTYPE,
-            )
-            if centered_traj is not None:
-                if len(centered_traj) == len(u_cg_universe.trajectory):
-                    frame_centered = centered_traj[cg_frame]
-                elif len(centered_traj) == len(frame_list):
-                    frame_centered = centered_traj[out_idx]
-                else:
-                    raise ValueError(
-                        f"centered input has {len(centered_traj)} frames but "
-                        f"CG trajectory has {len(u_cg_universe.trajectory)} "
-                        f"and reconstruction uses {len(frame_list)} frames"
-                    )
-            else:
-                frame_centered = None
-            aa_positions = self.backmap_positions(cg_positions, frame_centered)
-            u_aa.trajectory[out_idx].positions = aa_positions
-
-            if output_has_velocities:
-                cg_velocities = np.asarray(
-                    u_cg_universe.atoms.velocities,
-                    dtype=_BACKMAP_DTYPE,
-                )
-                if centered_vel_traj is not None:
-                    if len(centered_vel_traj) == len(u_cg_universe.trajectory):
-                        frame_centered_vel = centered_vel_traj[cg_frame]
-                    elif len(centered_vel_traj) == len(frame_list):
-                        frame_centered_vel = centered_vel_traj[out_idx]
-                    else:
-                        raise ValueError(
-                            f"aa_centered_velocities has {len(centered_vel_traj)} "
-                            f"frames but CG trajectory has "
-                            f"{len(u_cg_universe.trajectory)} frames"
-                        )
-                else:
-                    frame_centered_vel = None
-                aa_velocities = self.backmap_velocities(
-                    cg_velocities,
-                    frame_centered_vel,
-                )
-                u_aa.trajectory[out_idx].velocities = aa_velocities
-
-        return u_aa
-
-    @classmethod
-    def aa_universe_from_cg(
-        cls,
-        u_cg: UniverseSource,
-        mapping: MappingContext,
-        start: Optional[int] = None,
-        stop: Optional[int] = None,
-        step: Optional[int] = None,
-        frames: Optional[Iterable[int]] = None,
-        centered: Optional[CenteredSource] = None,
-        centered_velocities: Optional[CenteredSource] = None,
-    ) -> mda.Universe:
-        """Reconstruct an all-atom universe from coarse-grained input.
-
-        Parameters
-        ----------
-        u_cg
-            CG trajectory as a universe, topology path, or
-            ``(topology, trajectory)`` pair.
-        mapping
-            Either an existing :class:`CoarseGrain` instance, or
-            ``(aa_atomgroup, cg_map)`` to rebuild the mapper from an AA
-            selection and a saved ``cg_map.npz`` (or :class:`CoarseGrainMap`).
-        """
-        cg_instance = cls._coarsegrain_from_mapping(mapping)
-        return cg_instance.reconstruct_aa_universe(
-            u_cg=u_cg,
-            centered=centered,
-            centered_velocities=centered_velocities,
-            start=start,
-            stop=stop,
-            step=step,
-            frames=frames,
-        )
 
     def backmap_modes(self, cg_vectors: np.ndarray) -> np.ndarray:
         """Expand a coarse-grained mass-weighted mode onto atoms.
